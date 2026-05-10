@@ -1,7 +1,7 @@
 using Bindito.Core;
 using Timberborn.EntityPanelSystem;
 
-namespace Grant.BeaverTaskDisplay {
+namespace grantemsley.BeaverTaskDisplay {
   [Context("Game")]
   public class BeaverTaskConfigurator : Configurator {
 

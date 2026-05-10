@@ -12,7 +12,7 @@ using Timberborn.WalkingSystem;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Grant.BeaverTaskDisplay {
+namespace grantemsley.BeaverTaskDisplay {
 
   // Adds a small panel below the carrying section showing the beaver's current
   // task and (when applicable) a clickable destination. Click the destination
@@ -22,10 +22,10 @@ namespace Grant.BeaverTaskDisplay {
     private const string SubPanelClass = "entity-sub-panel";
     private const string SubBoxClass = "bg-sub-box--green";
 
-    private const string IdleLocKey = "Grant.BeaverTaskDisplay.Idle";
-    private const string TaskPrefixLocKey = "Grant.BeaverTaskDisplay.TaskPrefix";
-    private const string WalkingToLocKey = "Grant.BeaverTaskDisplay.WalkingTo";
-    private const string ExecutorLocKeyPrefix = "Grant.BeaverTaskDisplay.Executor.";
+    private const string IdleLocKey = "grantemsley.BeaverTaskDisplay.Idle";
+    private const string TaskPrefixLocKey = "grantemsley.BeaverTaskDisplay.TaskPrefix";
+    private const string WalkingToLocKey = "grantemsley.BeaverTaskDisplay.WalkingTo";
+    private const string ExecutorLocKeyPrefix = "grantemsley.BeaverTaskDisplay.Executor.";
 
     // Map of executor class name -> loc key suffix. Used to translate raw
     // class names (which is all ExecutorInfo.Name carries) into human-readable

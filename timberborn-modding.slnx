@@ -5,5 +5,5 @@
   <Project Path="Timberborn.ModdingTools.Common.csproj" />
   <Project Path="Timberborn.ModdingTools.ModBuilding.csproj" />
   <Project Path="Timberborn.ModdingTools.AssetsImporting.csproj" />
-  <Project Path="Grant.BeaverTaskDisplay.csproj" />
+  <Project Path="grantemsley.BeaverTaskDisplay.csproj" />
 </Solution>

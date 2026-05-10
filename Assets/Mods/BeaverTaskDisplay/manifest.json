@@ -1,7 +1,7 @@
 {
   "Name": "Beaver Task Display",
   "Version": "0.1.0.0",
-  "Id": "Grant.BeaverTaskDisplay",
+  "Id": "grantemsley.BeaverTaskDisplay",
   "MinimumGameVersion": "1.0.0.0",
   "Description": "Adds a task and walking destination row to the beaver info panel, below the carrying section. Click the destination to focus the camera on it.",
   "RequiredMods": []
