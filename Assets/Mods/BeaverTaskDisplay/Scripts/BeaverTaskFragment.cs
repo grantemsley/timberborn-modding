@@ -120,10 +120,11 @@ namespace grantemsley.BeaverTaskDisplay {
       row.style.flexWrap = Wrap.Wrap;
 
       _taskLabel = new Label { text = string.Empty };
-      _taskLabel.style.color = Color.white;
+      _taskLabel.AddToClassList("entity-panel__text");
       row.Add(_taskLabel);
 
       _destinationLabel = new Label { text = string.Empty };
+      _destinationLabel.AddToClassList("entity-panel__text");
       _destinationLabel.style.color = new Color(0.70f, 0.85f, 1f, 1f);
       _destinationLabel.RegisterCallback<ClickEvent>(_ => OnDestinationClicked());
       _destinationLabel.style.display = DisplayStyle.None;
@@ -142,7 +143,7 @@ namespace grantemsley.BeaverTaskDisplay {
       }
     }
 
-    public void ClearFragment() {
+public void ClearFragment() {
       _behaviorManager = null;
       if (_currentDestEntity != null) {
         _highlighter.UnhighlightAllSecondary();
