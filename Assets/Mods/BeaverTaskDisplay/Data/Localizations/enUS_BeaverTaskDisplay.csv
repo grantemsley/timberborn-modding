@@ -5,7 +5,6 @@ grantemsley.BeaverTaskDisplay.WalkingTo,-> {0},"Prefix for the walking destinati
 grantemsley.BeaverTaskDisplay.Executor.Waiting,Waiting,
 grantemsley.BeaverTaskDisplay.Executor.Building,Building,
 grantemsley.BeaverTaskDisplay.Executor.Demolishing,Demolishing,
-grantemsley.BeaverTaskDisplay.Executor.SatisfyingNeed,Satisfying need,Generic catch-all for need-satisfying actions (eating/drinking/sleeping).
 grantemsley.BeaverTaskDisplay.Executor.Planting,Planting,
 grantemsley.BeaverTaskDisplay.Executor.WalkingTo,Walking to,Used when the beaver is walking toward a reservable or accessible entity.
 grantemsley.BeaverTaskDisplay.Executor.Working,Working,
@@ -13,3 +12,10 @@ grantemsley.BeaverTaskDisplay.Executor.Entering,Entering,Walking into a building
 grantemsley.BeaverTaskDisplay.Executor.Walking,Walking,Walking to a position with no specific entity destination.
 grantemsley.BeaverTaskDisplay.Executor.Producing,Producing,
 grantemsley.BeaverTaskDisplay.Executor.Harvesting,Harvesting,
+grantemsley.BeaverTaskDisplay.Animation.Eating,Eating,
+grantemsley.BeaverTaskDisplay.Animation.Drinking,Drinking,
+grantemsley.BeaverTaskDisplay.Animation.Sleeping,Sleeping,
+grantemsley.BeaverTaskDisplay.Animation.Bathing,Bathing,
+grantemsley.BeaverTaskDisplay.Animation.HavingFun,Having fun,
+grantemsley.BeaverTaskDisplay.Animation.Healing,Healing,
+grantemsley.BeaverTaskDisplay.Animation.Resting,Resting,

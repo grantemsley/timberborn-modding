@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Reflection;
-using System.Text;
 using Timberborn.BaseComponentSystem;
 using Timberborn.BehaviorSystem;
 using Timberborn.CoreUI;
@@ -14,42 +13,40 @@ using UnityEngine.UIElements;
 
 namespace grantemsley.BeaverTaskDisplay {
 
-  // Adds a small panel below the carrying section showing the beaver's current
-  // task and (when applicable) a clickable destination. Click the destination
-  // to focus the camera on it.
   internal class BeaverTaskFragment : IEntityPanelFragment {
 
     private const string SubPanelClass = "entity-sub-panel";
     private const string SubBoxClass = "bg-sub-box--green";
 
     private const string IdleLocKey = "grantemsley.BeaverTaskDisplay.Idle";
-    private const string TaskPrefixLocKey = "grantemsley.BeaverTaskDisplay.TaskPrefix";
     private const string WalkingToLocKey = "grantemsley.BeaverTaskDisplay.WalkingTo";
-    private const string ExecutorLocKeyPrefix = "grantemsley.BeaverTaskDisplay.Executor.";
+    private const string TaskPrefixLocKey = "grantemsley.BeaverTaskDisplay.TaskPrefix";
 
-    // Map of executor class name -> loc key suffix. Used to translate raw
-    // class names (which is all ExecutorInfo.Name carries) into human-readable
-    // task descriptions. Unmapped executors fall back to a humanized split of
-    // the class name (e.g. "MyCustomExecutor" -> "My Custom").
-    private static readonly Dictionary<string, string> ExecutorLocSuffixes = new() {
-      { "WaitExecutor",             "Waiting" },
-      { "BuildExecutor",            "Building" },
-      { "DemolishExecutor",         "Demolishing" },
-      { "ApplyEffectExecutor",      "SatisfyingNeed" },
-      { "PlantExecutor",            "Planting" },
-      { "WalkToReservableExecutor", "WalkingTo" },
-      { "WorkAtReservableExecutor", "Working" },
-      { "WalkInsideExecutor",       "Entering" },
-      { "WalkToAccessibleExecutor", "WalkingTo" },
-      { "WalkToPositionExecutor",   "Walking" },
-      { "ProduceExecutor",          "Producing" },
-      { "WorkExecutor",             "Working" },
-      { "RemoveYieldExecutor",      "Harvesting" },
+    private static readonly Dictionary<string, string> ExecutorLocKeys = new() {
+      { "WaitExecutor",              "grantemsley.BeaverTaskDisplay.Executor.Waiting" },
+      { "BuildExecutor",             "grantemsley.BeaverTaskDisplay.Executor.Building" },
+      { "DemolishExecutor",          "grantemsley.BeaverTaskDisplay.Executor.Demolishing" },
+      { "PlantExecutor",             "grantemsley.BeaverTaskDisplay.Executor.Planting" },
+      { "WalkToAccessibleExecutor",  "grantemsley.BeaverTaskDisplay.Executor.WalkingTo" },
+      { "WalkToReservableExecutor",  "grantemsley.BeaverTaskDisplay.Executor.WalkingTo" },
+      { "WorkAtReservableExecutor",  "grantemsley.BeaverTaskDisplay.Executor.Working" },
+      { "WalkInsideExecutor",        "grantemsley.BeaverTaskDisplay.Executor.Entering" },
+      { "WalkToPositionExecutor",    "grantemsley.BeaverTaskDisplay.Executor.Walking" },
+      { "ProduceExecutor",           "grantemsley.BeaverTaskDisplay.Executor.Producing" },
+      { "WorkExecutor",              "grantemsley.BeaverTaskDisplay.Executor.Working" },
+      { "RemoveYieldExecutor",       "grantemsley.BeaverTaskDisplay.Executor.Harvesting" },
     };
 
-    // Cached reflection handles. The public API surfaces ExecutorInfo (a struct
-    // with just a name + elapsed time); to inspect the actual IExecutor for
-    // walking-target details, we read the private _runningExecutor field.
+    private static readonly Dictionary<string, string> AnimationLocKeys = new() {
+      { "Eating",    "grantemsley.BeaverTaskDisplay.Animation.Eating" },
+      { "Drinking",  "grantemsley.BeaverTaskDisplay.Animation.Drinking" },
+      { "Sleeping",  "grantemsley.BeaverTaskDisplay.Animation.Sleeping" },
+      { "Bathing",   "grantemsley.BeaverTaskDisplay.Animation.Bathing" },
+      { "HavingFun", "grantemsley.BeaverTaskDisplay.Animation.HavingFun" },
+      { "Healing",   "grantemsley.BeaverTaskDisplay.Animation.Healing" },
+      { "Resting",   "grantemsley.BeaverTaskDisplay.Animation.Resting" },
+    };
+
     private static readonly FieldInfo BehaviorManagerRunningExecutorField =
         typeof(BehaviorManager).GetField(
             "_runningExecutor", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -61,6 +58,9 @@ namespace grantemsley.BeaverTaskDisplay {
     private static readonly FieldInfo WalkInsideBuildingAccessibleField =
         typeof(WalkInsideExecutor).GetField(
             "_buildingAccessible", BindingFlags.NonPublic | BindingFlags.Instance);
+
+    // Cached lazily on first ApplyEffectExecutor encounter (type lives in a separate assembly).
+    private static FieldInfo _applyEffectAnimNameField;
 
     private readonly EntitySelectionService _entitySelectionService;
     private readonly SelectableObjectRetriever _selectableObjectRetriever;
@@ -85,25 +85,24 @@ namespace grantemsley.BeaverTaskDisplay {
       _root = new NineSliceVisualElement();
       _root.AddToClassList(SubPanelClass);
       _root.AddToClassList(SubBoxClass);
-      _root.style.alignItems = Align.FlexStart;
-      _root.style.paddingLeft = 8;
-      _root.style.paddingRight = 8;
-      _root.style.paddingTop = 4;
-      _root.style.paddingBottom = 4;
       _root.ToggleDisplayStyle(false);
+
+      // Horizontal row so task and destination sit on the same line and wrap together.
+      var row = new VisualElement();
+      row.style.flexDirection = FlexDirection.Row;
+      row.style.flexWrap = Wrap.Wrap;
 
       _taskLabel = new Label { text = string.Empty };
       _taskLabel.style.color = Color.white;
-      _root.Add(_taskLabel);
+      row.Add(_taskLabel);
 
       _destinationLabel = new Label { text = string.Empty };
-      // A pale, slightly blue tone to suggest "clickable" without going full Unity-link blue.
       _destinationLabel.style.color = new Color(0.70f, 0.85f, 1f, 1f);
-      _destinationLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
       _destinationLabel.RegisterCallback<ClickEvent>(_ => OnDestinationClicked());
       _destinationLabel.style.display = DisplayStyle.None;
-      _root.Add(_destinationLabel);
+      row.Add(_destinationLabel);
 
+      _root.Add(row);
       return _root;
     }
 
@@ -130,26 +129,15 @@ namespace grantemsley.BeaverTaskDisplay {
     }
 
     private void Refresh() {
-      // Task description — RunningExecutor returns an ExecutorInfo struct
-      // (Name + ElapsedTime). Use RunningExecutor.Name to determine if an executor is running.
-      var executorClassName = _behaviorManager.RunningExecutor.Name;
-      if (!string.IsNullOrEmpty(executorClassName)) {
-        var friendly = GetFriendlyExecutorName(executorClassName);
-        _taskLabel.text = _loc.T(TaskPrefixLocKey, friendly);
-      } else {
-        _taskLabel.text = _loc.T(IdleLocKey);
-      }
-
-      // Destination — we need the real IExecutor instance to inspect walking
-      // targets, which is only available via the private field.
       var actualExecutor = BehaviorManagerRunningExecutorField?.GetValue(_behaviorManager) as IExecutor;
+      _taskLabel.text = GetTaskText(actualExecutor);
+
       var destEntity = TryGetDestinationEntity(actualExecutor);
       if (destEntity != null) {
         var named = destEntity.GetComponent<NamedEntity>();
-        var displayName = named != null
-            ? named.EntityName
-            : destEntity.GameObject.name;
-        _destinationLabel.text = _loc.T(WalkingToLocKey, displayName);
+        var displayName = named != null ? named.EntityName : destEntity.GameObject.name;
+        // Leading space separates the destination text from the task label.
+        _destinationLabel.text = " " + _loc.T(WalkingToLocKey, displayName);
         _destinationLabel.style.display = DisplayStyle.Flex;
         _currentDestEntity = destEntity;
       } else {
@@ -158,32 +146,32 @@ namespace grantemsley.BeaverTaskDisplay {
       }
     }
 
-    private string GetFriendlyExecutorName(string executorClassName) {
-      if (ExecutorLocSuffixes.TryGetValue(executorClassName, out var suffix)) {
-        return _loc.T(ExecutorLocKeyPrefix + suffix);
+    private string GetTaskText(IExecutor executor) {
+      if (executor == null || string.IsNullOrEmpty(_behaviorManager.RunningExecutor.Name)) {
+        return _loc.T(IdleLocKey);
       }
-      return Humanize(executorClassName);
-    }
 
-    // "WalkToReservableExecutor" -> "Walk To Reservable"
-    private static string Humanize(string className) {
-      if (className.EndsWith("Executor")) {
-        className = className.Substring(0, className.Length - "Executor".Length);
-      }
-      var sb = new StringBuilder(className.Length + 4);
-      for (var i = 0; i < className.Length; i++) {
-        if (i > 0 && char.IsUpper(className[i]) && !char.IsUpper(className[i - 1])) {
-          sb.Append(' ');
+      var typeName = executor.GetType().Name;
+
+      if (typeName == "ApplyEffectExecutor") {
+        _applyEffectAnimNameField ??= executor.GetType().GetField(
+            "_animationName", BindingFlags.NonPublic | BindingFlags.Instance);
+        var animName = _applyEffectAnimNameField?.GetValue(executor) as string;
+        if (animName != null && AnimationLocKeys.TryGetValue(animName, out var animKey)) {
+          return _loc.T(animKey);
         }
-        sb.Append(className[i]);
+        return _loc.T(TaskPrefixLocKey, animName ?? typeName);
       }
-      return sb.ToString();
+
+      if (ExecutorLocKeys.TryGetValue(typeName, out var locKey)) {
+        return _loc.T(locKey);
+      }
+
+      return _loc.T(TaskPrefixLocKey, typeName);
     }
 
     private static BaseComponent TryGetDestinationEntity(IExecutor executor) {
-      if (executor == null) {
-        return null;
-      }
+      if (executor == null) return null;
       switch (executor) {
         case WalkToAccessibleExecutor walkAcc:
           return WalkToAccessibleAccessibleField?.GetValue(walkAcc) as BaseComponent;
@@ -195,10 +183,7 @@ namespace grantemsley.BeaverTaskDisplay {
     }
 
     private void OnDestinationClicked() {
-      if (_currentDestEntity == null) {
-        return;
-      }
-      // TryGetSelectableObject takes a GameObject, not a BaseComponent.
+      if (_currentDestEntity == null) return;
       if (_selectableObjectRetriever.TryGetSelectableObject(
               _currentDestEntity.GameObject, out var selectable)) {
         _entitySelectionService.SelectAndFocusOn(selectable);
