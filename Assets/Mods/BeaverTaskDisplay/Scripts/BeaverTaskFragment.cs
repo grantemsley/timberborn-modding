@@ -7,6 +7,7 @@ using Timberborn.EntityNaming;
 using Timberborn.EntityPanelSystem;
 using Timberborn.Localization;
 using Timberborn.SelectionSystem;
+using Timberborn.ReservableSystem;
 using Timberborn.WalkingSystem;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -58,6 +59,10 @@ namespace grantemsley.BeaverTaskDisplay {
     private static readonly FieldInfo WalkInsideBuildingAccessibleField =
         typeof(WalkInsideExecutor).GetField(
             "_buildingAccessible", BindingFlags.NonPublic | BindingFlags.Instance);
+
+    private static readonly FieldInfo WalkToReservableReservableField =
+        typeof(WalkToReservableExecutor).GetField(
+            "_reservable", BindingFlags.NonPublic | BindingFlags.Instance);
 
     // Cached lazily on first ApplyEffectExecutor encounter (type lives in a separate assembly).
     private static FieldInfo _applyEffectAnimNameField;
@@ -176,6 +181,8 @@ namespace grantemsley.BeaverTaskDisplay {
           return WalkToAccessibleAccessibleField?.GetValue(walkAcc) as BaseComponent;
         case WalkInsideExecutor walkIn:
           return WalkInsideBuildingAccessibleField?.GetValue(walkIn) as BaseComponent;
+        case WalkToReservableExecutor walkRes:
+          return WalkToReservableReservableField?.GetValue(walkRes) as BaseComponent;
         default:
           return null;
       }
