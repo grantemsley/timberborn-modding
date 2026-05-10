@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using Timberborn.BaseComponentSystem;
 using Timberborn.BehaviorSystem;
+using Timberborn.Carrying;
 using Timberborn.CoreUI;
 using Timberborn.EntityNaming;
 using Timberborn.EntityPanelSystem;
@@ -48,6 +49,35 @@ namespace grantemsley.BeaverTaskDisplay {
       { "HavingFun", "grantemsley.BeaverTaskDisplay.Animation.HavingFun" },
       { "Healing",   "grantemsley.BeaverTaskDisplay.Animation.Healing" },
       { "Resting",   "grantemsley.BeaverTaskDisplay.Animation.Resting" },
+    };
+
+    // Prefix loc keys for entity-walking executors when behavior provides intent context.
+    // The building name is appended via _destinationLabel; translators write only the prefix.
+    private static readonly Dictionary<string, string> WalkBehaviorPrefixKeys = new() {
+      { "LaborWorkplaceBehavior",          "grantemsley.BeaverTaskDisplay.Walk.WorkAt" },
+      { "PlanterWorkplaceBehavior",        "grantemsley.BeaverTaskDisplay.Walk.WorkAt" },
+      { "BuildBehavior",                   "grantemsley.BeaverTaskDisplay.Walk.BuildAt" },
+      { "DemolishBehavior",               "grantemsley.BeaverTaskDisplay.Walk.DemolishAt" },
+      { "GatherWorkplaceBehavior",         "grantemsley.BeaverTaskDisplay.Walk.HarvestAt" },
+      { "LumberjackFlagWorkplaceBehavior", "grantemsley.BeaverTaskDisplay.Walk.HarvestAt" },
+      { "YieldRemoverBehavior",            "grantemsley.BeaverTaskDisplay.Walk.HarvestAt" },
+      { "InventoryNeedBehavior",           "grantemsley.BeaverTaskDisplay.Walk.EatAt" },
+      { "SleepNeedBehavior",              "grantemsley.BeaverTaskDisplay.Walk.SleepAt" },
+      { "AttractionNeedBehavior",         "grantemsley.BeaverTaskDisplay.Walk.VisitAt" },
+      { "ProduceWorkplaceBehavior",       "grantemsley.BeaverTaskDisplay.Walk.WorkAt" },
+      // CarryRootBehavior and HaulWorkplaceBehavior handled inline — need GoodCarrier.IsCarrying check
+    };
+
+    // Complete text for WalkToPositionExecutor when behavior provides context.
+    private static readonly Dictionary<string, string> PositionWalkBehaviorKeys = new() {
+      { "PlanterWorkplaceBehavior", "grantemsley.BeaverTaskDisplay.Walk.Plant" },
+      { "SleepNeedBehavior",        "grantemsley.BeaverTaskDisplay.Walk.Sleep" },
+    };
+
+    // Text shown when there is no running executor but a behavior is active (between executors).
+    private static readonly Dictionary<string, string> BehaviorOnlyLocKeys = new() {
+      { "EmptyOutputWorkplaceBehavior", "grantemsley.BeaverTaskDisplay.Behavior.EmptyingOutput" },
+      { "FillInputWorkplaceBehavior",   "grantemsley.BeaverTaskDisplay.Behavior.FillingInput" },
     };
 
     // Fallback when _animationName is null (e.g. slot-based animations like the medical bed).
@@ -131,6 +161,7 @@ namespace grantemsley.BeaverTaskDisplay {
       row.Add(_destinationLabel);
 
       _root.Add(row);
+
       return _root;
     }
 
@@ -185,10 +216,44 @@ public void ClearFragment() {
 
     private string GetTaskText(IExecutor executor) {
       if (executor == null || string.IsNullOrEmpty(_behaviorManager.RunningExecutor.Name)) {
+        var behaviorOnly = _behaviorManager.RunningBehavior.Name;
+        if (!string.IsNullOrEmpty(behaviorOnly) &&
+            BehaviorOnlyLocKeys.TryGetValue(behaviorOnly, out var bOnlyKey)) {
+          return _loc.T(TaskPrefixLocKey, _loc.T(bOnlyKey));
+        }
         return _loc.T(IdleLocKey);
       }
 
       var typeName = executor.GetType().Name;
+      var behaviorName = _behaviorManager.RunningBehavior.Name;
+
+      // WalkToPositionExecutor: no entity destination, but behavior may provide context (e.g. planting).
+      if (typeName == "WalkToPositionExecutor") {
+        if (!string.IsNullOrEmpty(behaviorName) &&
+            PositionWalkBehaviorKeys.TryGetValue(behaviorName, out var posKey)) {
+          return _loc.T(TaskPrefixLocKey, _loc.T(posKey));
+        }
+        // fall through → ExecutorLocKeys["WalkToPositionExecutor"] = "Walking"
+      }
+
+      // Entity-walking executors: use behavior name to show intent rather than generic "Walking to".
+      if (typeName is "WalkToAccessibleExecutor" or "WalkToReservableExecutor" or "WalkInsideExecutor") {
+        if (!string.IsNullOrEmpty(behaviorName)) {
+          string prefixKey = null;
+          if (behaviorName == "HaulWorkplaceBehavior" || behaviorName == "CarryRootBehavior") {
+            var carrier = _behaviorManager.GetComponent<GoodCarrier>();
+            prefixKey = (carrier != null && carrier.IsCarrying)
+                ? "grantemsley.BeaverTaskDisplay.Walk.HaulTo"
+                : "grantemsley.BeaverTaskDisplay.Walk.HaulFrom";
+          } else {
+            WalkBehaviorPrefixKeys.TryGetValue(behaviorName, out prefixKey);
+          }
+          if (prefixKey != null) {
+            return _loc.T(TaskPrefixLocKey, _loc.T(prefixKey));
+          }
+        }
+        // Unknown behavior → fall through to ExecutorLocKeys ("Walking to" / "Entering")
+      }
 
       if (typeName == "ApplyEffectExecutor") {
         _applyEffectAnimNameField ??= executor.GetType().GetField(

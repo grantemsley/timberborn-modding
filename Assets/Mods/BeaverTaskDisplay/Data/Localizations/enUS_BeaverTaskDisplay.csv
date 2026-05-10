@@ -19,3 +19,16 @@ grantemsley.BeaverTaskDisplay.Animation.Bathing,Bathing,
 grantemsley.BeaverTaskDisplay.Animation.HavingFun,Having fun,
 grantemsley.BeaverTaskDisplay.Animation.Healing,Healing,
 grantemsley.BeaverTaskDisplay.Animation.Resting,Resting,
+grantemsley.BeaverTaskDisplay.Walk.HaulFrom,Hauling from,"Prefix before building name when walking to pick up goods. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.HaulTo,Hauling to,"Prefix before building name when walking to deliver goods. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.WorkAt,Walking to work at,"Prefix before building name when walking to a workplace. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.BuildAt,Walking to build at,"Prefix before building name when walking to a construction site. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.DemolishAt,Walking to demolish at,"Prefix before building name when walking to demolish. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.HarvestAt,Walking to harvest at,"Prefix before building name when walking to harvest/gather/log. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.Plant,Walking to plant,Complete text shown when walking to a tile position to plant (no building destination).
+grantemsley.BeaverTaskDisplay.Walk.Sleep,Walking to sleep,Complete text when walking to a sleep position with no building destination.
+grantemsley.BeaverTaskDisplay.Walk.SleepAt,Walking to sleep at,"Prefix before building name when walking to sleep. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.EatAt,Walking to eat at,"Prefix before building name when walking to eat or drink. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.VisitAt,Walking to visit,"Prefix before building name when walking to an attraction. Building name follows."
+grantemsley.BeaverTaskDisplay.Behavior.EmptyingOutput,Emptying output,Shown when emptying a workshop's output with no active walking executor.
+grantemsley.BeaverTaskDisplay.Behavior.FillingInput,Filling input,Shown when filling a workshop's input with no active walking executor.
