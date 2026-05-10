@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using Timberborn.BaseComponentSystem;
@@ -48,6 +49,15 @@ namespace grantemsley.BeaverTaskDisplay {
       { "Resting",   "grantemsley.BeaverTaskDisplay.Animation.Resting" },
     };
 
+    // Fallback when _animationName is null (e.g. slot-based animations like the medical bed).
+    // Maps the NeedId of the first effect to a display string.
+    private static readonly Dictionary<string, string> NeedIdLocKeys = new() {
+      { "Hunger",  "grantemsley.BeaverTaskDisplay.Animation.Eating" },
+      { "Thirst",  "grantemsley.BeaverTaskDisplay.Animation.Drinking" },
+      { "Sleep",   "grantemsley.BeaverTaskDisplay.Animation.Sleeping" },
+      { "Injury",  "grantemsley.BeaverTaskDisplay.Animation.Healing" },
+    };
+
     private static readonly FieldInfo BehaviorManagerRunningExecutorField =
         typeof(BehaviorManager).GetField(
             "_runningExecutor", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -66,6 +76,7 @@ namespace grantemsley.BeaverTaskDisplay {
 
     // Cached lazily on first ApplyEffectExecutor encounter (type lives in a separate assembly).
     private static FieldInfo _applyEffectAnimNameField;
+    private static FieldInfo _applyEffectEffectsField;
 
     private readonly EntitySelectionService _entitySelectionService;
     private readonly SelectableObjectRetriever _selectableObjectRetriever;
@@ -162,13 +173,28 @@ namespace grantemsley.BeaverTaskDisplay {
             "_animationName", BindingFlags.NonPublic | BindingFlags.Instance);
         var animName = _applyEffectAnimNameField?.GetValue(executor) as string;
         if (animName != null && AnimationLocKeys.TryGetValue(animName, out var animKey)) {
-          return _loc.T(animKey);
+          return _loc.T(TaskPrefixLocKey, _loc.T(animKey));
         }
+
+        // _animationName is null when the building uses a slot-based animation (e.g. medical bed).
+        // Fall back to the NeedId of the first effect.
+        _applyEffectEffectsField ??= executor.GetType().GetField(
+            "_effects", BindingFlags.NonPublic | BindingFlags.Instance);
+        if (_applyEffectEffectsField?.GetValue(executor) is IEnumerable effects) {
+          foreach (var effect in effects) {
+            var needId = effect?.GetType().GetProperty("NeedId")?.GetValue(effect) as string;
+            if (needId != null && NeedIdLocKeys.TryGetValue(needId, out var needKey)) {
+              return _loc.T(TaskPrefixLocKey, _loc.T(needKey));
+            }
+            break;
+          }
+        }
+
         return _loc.T(TaskPrefixLocKey, animName ?? typeName);
       }
 
       if (ExecutorLocKeys.TryGetValue(typeName, out var locKey)) {
-        return _loc.T(locKey);
+        return _loc.T(TaskPrefixLocKey, _loc.T(locKey));
       }
 
       return _loc.T(TaskPrefixLocKey, typeName);
