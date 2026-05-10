@@ -198,8 +198,8 @@ namespace grantemsley.BeaverTaskDisplay {
           }
           if (firstNeedId != null) {
             var needSpec = _factionNeedService.GetBeaverOrBotNeedById(firstNeedId);
-            var locKey = needSpec?.DisplayNameLocKey;
-            return _loc.T(TaskPrefixLocKey, string.IsNullOrEmpty(locKey) ? firstNeedId : _loc.T(locKey));
+            var needLocKey = needSpec?.DisplayNameLocKey;
+            return _loc.T(TaskPrefixLocKey, string.IsNullOrEmpty(needLocKey) ? firstNeedId : _loc.T(needLocKey));
           }
         }
 
