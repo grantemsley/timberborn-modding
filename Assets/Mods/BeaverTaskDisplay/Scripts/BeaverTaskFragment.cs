@@ -6,6 +6,7 @@ using Timberborn.BehaviorSystem;
 using Timberborn.CoreUI;
 using Timberborn.EntityNaming;
 using Timberborn.EntityPanelSystem;
+using Timberborn.GameFactionSystem;
 using Timberborn.Localization;
 using Timberborn.SelectionSystem;
 using Timberborn.ReservableSystem;
@@ -50,12 +51,14 @@ namespace grantemsley.BeaverTaskDisplay {
     };
 
     // Fallback when _animationName is null (e.g. slot-based animations like the medical bed).
-    // Maps the NeedId of the first effect to a display string.
+    // Maps the NeedId of the first known effect to a display string.
+    // Buildings with unmapped NeedIds (e.g. "Lido") fall back to showing the NeedId itself.
     private static readonly Dictionary<string, string> NeedIdLocKeys = new() {
       { "Hunger",  "grantemsley.BeaverTaskDisplay.Animation.Eating" },
       { "Thirst",  "grantemsley.BeaverTaskDisplay.Animation.Drinking" },
       { "Sleep",   "grantemsley.BeaverTaskDisplay.Animation.Sleeping" },
       { "Injury",  "grantemsley.BeaverTaskDisplay.Animation.Healing" },
+      { "WetFur",  "grantemsley.BeaverTaskDisplay.Animation.Bathing" },
     };
 
     private static readonly FieldInfo BehaviorManagerRunningExecutorField =
@@ -80,6 +83,7 @@ namespace grantemsley.BeaverTaskDisplay {
 
     private readonly EntitySelectionService _entitySelectionService;
     private readonly SelectableObjectRetriever _selectableObjectRetriever;
+    private readonly FactionNeedService _factionNeedService;
     private readonly ILoc _loc;
 
     private VisualElement _root;
@@ -91,9 +95,11 @@ namespace grantemsley.BeaverTaskDisplay {
 
     public BeaverTaskFragment(EntitySelectionService entitySelectionService,
                               SelectableObjectRetriever selectableObjectRetriever,
+                              FactionNeedService factionNeedService,
                               ILoc loc) {
       _entitySelectionService = entitySelectionService;
       _selectableObjectRetriever = selectableObjectRetriever;
+      _factionNeedService = factionNeedService;
       _loc = loc;
     }
 
@@ -181,12 +187,19 @@ namespace grantemsley.BeaverTaskDisplay {
         _applyEffectEffectsField ??= executor.GetType().GetField(
             "_effects", BindingFlags.NonPublic | BindingFlags.Instance);
         if (_applyEffectEffectsField?.GetValue(executor) is IEnumerable effects) {
+          string firstNeedId = null;
           foreach (var effect in effects) {
             var needId = effect?.GetType().GetProperty("NeedId")?.GetValue(effect) as string;
-            if (needId != null && NeedIdLocKeys.TryGetValue(needId, out var needKey)) {
+            if (needId == null) continue;
+            firstNeedId ??= needId;
+            if (NeedIdLocKeys.TryGetValue(needId, out var needKey)) {
               return _loc.T(TaskPrefixLocKey, _loc.T(needKey));
             }
-            break;
+          }
+          if (firstNeedId != null) {
+            var needSpec = _factionNeedService.GetBeaverOrBotNeedById(firstNeedId);
+            var locKey = needSpec?.DisplayNameLocKey;
+            return _loc.T(TaskPrefixLocKey, string.IsNullOrEmpty(locKey) ? firstNeedId : _loc.T(locKey));
           }
         }
 
