@@ -81,9 +81,12 @@ namespace grantemsley.BeaverTaskDisplay {
     private static FieldInfo _applyEffectAnimNameField;
     private static FieldInfo _applyEffectEffectsField;
 
+    private static readonly Color DestinationHighlightColor = new(0.5f, 0.15f, 0f, 0.5f);
+
     private readonly EntitySelectionService _entitySelectionService;
     private readonly SelectableObjectRetriever _selectableObjectRetriever;
     private readonly FactionNeedService _factionNeedService;
+    private readonly Highlighter _highlighter;
     private readonly ILoc _loc;
 
     private VisualElement _root;
@@ -96,10 +99,12 @@ namespace grantemsley.BeaverTaskDisplay {
     public BeaverTaskFragment(EntitySelectionService entitySelectionService,
                               SelectableObjectRetriever selectableObjectRetriever,
                               FactionNeedService factionNeedService,
+                              Highlighter highlighter,
                               ILoc loc) {
       _entitySelectionService = entitySelectionService;
       _selectableObjectRetriever = selectableObjectRetriever;
       _factionNeedService = factionNeedService;
+      _highlighter = highlighter;
       _loc = loc;
     }
 
@@ -139,7 +144,10 @@ namespace grantemsley.BeaverTaskDisplay {
 
     public void ClearFragment() {
       _behaviorManager = null;
-      _currentDestEntity = null;
+      if (_currentDestEntity != null) {
+        _highlighter.UnhighlightAllSecondary();
+        _currentDestEntity = null;
+      }
       _destinationLabel.style.display = DisplayStyle.None;
       _root.ToggleDisplayStyle(false);
     }
@@ -155,15 +163,22 @@ namespace grantemsley.BeaverTaskDisplay {
       _taskLabel.text = GetTaskText(actualExecutor);
 
       var destEntity = TryGetDestinationEntity(actualExecutor);
+      if (destEntity != _currentDestEntity) {
+        if (_currentDestEntity != null) {
+          _highlighter.UnhighlightAllSecondary();
+        }
+        _currentDestEntity = destEntity;
+        if (destEntity != null) {
+          _highlighter.HighlightSecondary(destEntity, DestinationHighlightColor);
+        }
+      }
       if (destEntity != null) {
         var named = destEntity.GetComponent<NamedEntity>();
         var displayName = named != null ? named.EntityName : destEntity.GameObject.name;
         _destinationLabel.text = " " + _loc.T(WalkingToLocKey, displayName);
         _destinationLabel.style.display = DisplayStyle.Flex;
-        _currentDestEntity = destEntity;
       } else {
         _destinationLabel.style.display = DisplayStyle.None;
-        _currentDestEntity = null;
       }
     }
 
