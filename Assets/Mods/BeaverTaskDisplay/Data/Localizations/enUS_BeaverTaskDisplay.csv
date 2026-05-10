@@ -1,7 +1,7 @@
 ID,Text,Comment
 grantemsley.BeaverTaskDisplay.Idle,Idle,Shown when the beaver has no current task.
 grantemsley.BeaverTaskDisplay.TaskPrefix,Task: {0},"Prefix for the task description. {0} is the task name."
-grantemsley.BeaverTaskDisplay.WalkingTo,-> {0},"Prefix for the walking destination. {0} is the destination name."
+grantemsley.BeaverTaskDisplay.WalkingTo,{0},The destination entity name shown after the arrow.
 grantemsley.BeaverTaskDisplay.Executor.Waiting,Waiting,
 grantemsley.BeaverTaskDisplay.Executor.Building,Building,
 grantemsley.BeaverTaskDisplay.Executor.Demolishing,Demolishing,

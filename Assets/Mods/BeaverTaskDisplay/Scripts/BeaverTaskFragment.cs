@@ -136,7 +136,6 @@ namespace grantemsley.BeaverTaskDisplay {
       if (destEntity != null) {
         var named = destEntity.GetComponent<NamedEntity>();
         var displayName = named != null ? named.EntityName : destEntity.GameObject.name;
-        // Leading space separates the destination text from the task label.
         _destinationLabel.text = " " + _loc.T(WalkingToLocKey, displayName);
         _destinationLabel.style.display = DisplayStyle.Flex;
         _currentDestEntity = destEntity;
