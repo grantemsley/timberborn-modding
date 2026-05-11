@@ -27,7 +27,8 @@ grantemsley.BeaverTaskDisplay.Walk.HarvestAt,Walking to harvest at,"Prefix befor
 grantemsley.BeaverTaskDisplay.Walk.Plant,Walking to plant,Complete text when walking to a tile position to plant (no entity destination).
 grantemsley.BeaverTaskDisplay.Walk.Sleep,Walking to sleep,Complete text when walking to a sleep position with no building destination.
 grantemsley.BeaverTaskDisplay.Walk.SleepAt,Walking to sleep at,"Prefix before building name when walking to sleep inside a building. Building name follows."
-grantemsley.BeaverTaskDisplay.Walk.EatAt,Walking to eat at,"Prefix before building name when walking to eat or drink. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.EatAt,Walking to eat at,"Prefix before building name when walking to eat. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.DrinkAt,Walking to drink at,"Prefix before building name when walking to drink. Building name follows."
 grantemsley.BeaverTaskDisplay.Walk.VisitAt,Walking to visit,"Prefix before building name when walking to an attraction. Building name follows."
 grantemsley.BeaverTaskDisplay.Behavior.EmptyingOutput,Emptying output,Shown when emptying a workshop's output with no active walking executor.
 grantemsley.BeaverTaskDisplay.Behavior.FillingInput,Filling input,Shown when filling a workshop's input with no active walking executor.

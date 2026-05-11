@@ -72,7 +72,7 @@ namespace grantemsley.BeaverTaskDisplay {
       { "GatherWorkplaceBehavior",         "grantemsley.BeaverTaskDisplay.Walk.HarvestAt" },
       { "LumberjackFlagWorkplaceBehavior", "grantemsley.BeaverTaskDisplay.Walk.HarvestAt" },
       { "YieldRemoverBehavior",            "grantemsley.BeaverTaskDisplay.Walk.HarvestAt" },
-      { "InventoryNeedBehavior",           "grantemsley.BeaverTaskDisplay.Walk.EatAt" },
+      // InventoryNeedBehavior handled inline — need to distinguish eat vs drink via reflection
       { "SleepNeedBehavior",              "grantemsley.BeaverTaskDisplay.Walk.SleepAt" },
       { "AttractionNeedBehavior",         "grantemsley.BeaverTaskDisplay.Walk.VisitAt" },
       { "ProduceWorkplaceBehavior",       "grantemsley.BeaverTaskDisplay.Walk.WorkAt" },
@@ -128,6 +128,10 @@ namespace grantemsley.BeaverTaskDisplay {
     private static FieldInfo _applyEffectAnimNameField;
     private static FieldInfo _applyEffectEffectsField;
 
+    // Cached lazily to read the need being targeted by InventoryNeedBehavior.
+    private static FieldInfo _behaviorManagerRunningBehaviorField;
+    private static FieldInfo _inventoryNeedBehaviorNeedIdField;
+
     private static readonly Color DestinationHighlightColor = new(0.5f, 0.15f, 0f, 0.5f); // dark orange, semi-transparent
 
     private readonly EntitySelectionService _entitySelectionService;
@@ -141,10 +145,17 @@ namespace grantemsley.BeaverTaskDisplay {
     private Label _destinationLabel;
 
     private BehaviorManager _behaviorManager;
+    private Walker _walker;
     private BaseComponent _currentDestEntity;
     private string _cachedTaskText;
     private string _lastExecutorName;
     private string _lastBehaviorName;
+    private bool _lastIsCarrying;
+
+    private LineRenderer _pathLine;
+    private GameObject _pathLineGO;
+    private Mesh _arrowMesh;
+    private MeshRenderer _arrowMeshRenderer;
 
     public BeaverTaskFragment(EntitySelectionService entitySelectionService,
                               SelectableObjectRetriever selectableObjectRetriever,
@@ -184,6 +195,25 @@ namespace grantemsley.BeaverTaskDisplay {
 
       _root.Add(row);
 
+      _pathLineGO = new GameObject("[BTD_PathLine]");
+      _pathLine = _pathLineGO.AddComponent<LineRenderer>();
+      _pathLine.material = new Material(Shader.Find("Legacy Shaders/Particles/Alpha Blended Premultiply"));
+      _pathLine.startColor = new Color(1f, 0.65f, 0f, 0.9f);
+      _pathLine.endColor   = new Color(1f, 0.65f, 0f, 0.9f);
+      _pathLine.startWidth = 0.25f;
+      _pathLine.endWidth   = 0.25f;
+      _pathLine.useWorldSpace = true;
+      _pathLine.enabled = false;
+
+      var arrowGO = new GameObject("[BTD_PathArrows]");
+      _arrowMesh = new Mesh { name = "BTD_ArrowMesh" };
+      arrowGO.AddComponent<MeshFilter>().sharedMesh = _arrowMesh;
+      _arrowMeshRenderer = arrowGO.AddComponent<MeshRenderer>();
+      _arrowMeshRenderer.sharedMaterial = new Material(Shader.Find("Sprites/Default")) {
+        color = new Color(1f, 0.65f, 0f, 0.9f)
+      };
+      _arrowMeshRenderer.enabled = false;
+
       // To re-enable the behavior scanner (for discovering new executor+behavior names):
       // uncomment the block below and the BeaverTaskScanner class at the bottom of this file,
       // build the mod, then play and check Player.log for [BTD scan] lines.
@@ -201,6 +231,7 @@ namespace grantemsley.BeaverTaskDisplay {
       var walker = entity.GetComponent<Walker>();
       if (bm != null && walker != null) {
         _behaviorManager = bm;
+        _walker = walker;
         _root.ToggleDisplayStyle(true);
         Refresh();
       }
@@ -208,8 +239,12 @@ namespace grantemsley.BeaverTaskDisplay {
 
     public void ClearFragment() {
       _behaviorManager = null;
+      _walker = null;
       _lastExecutorName = null;
       _lastBehaviorName = null;
+      _lastIsCarrying = false;
+      _pathLine.enabled = false;
+      _arrowMeshRenderer.enabled = false;
       if (_currentDestEntity != null) {
         _highlighter.UnhighlightAllSecondary();
         _currentDestEntity = null;
@@ -228,9 +263,12 @@ namespace grantemsley.BeaverTaskDisplay {
       var actualExecutor = BehaviorManagerRunningExecutorField?.GetValue(_behaviorManager) as IExecutor;
       var execName = _behaviorManager.RunningExecutor.Name;
       var behaviorName = _behaviorManager.RunningBehavior.Name;
-      if (execName != _lastExecutorName || behaviorName != _lastBehaviorName) {
+      var carrier = _behaviorManager.GetComponent<GoodCarrier>();
+      var isCarrying = carrier != null && carrier.IsCarrying;
+      if (execName != _lastExecutorName || behaviorName != _lastBehaviorName || isCarrying != _lastIsCarrying) {
         _lastExecutorName = execName;
         _lastBehaviorName = behaviorName;
+        _lastIsCarrying = isCarrying;
         _cachedTaskText = GetTaskText(actualExecutor);
       }
       _taskLabel.text = _cachedTaskText;
@@ -253,6 +291,96 @@ namespace grantemsley.BeaverTaskDisplay {
       } else {
         _destinationLabel.style.display = DisplayStyle.None;
       }
+
+      RefreshPathLine();
+    }
+
+    // Reusable buffers to avoid per-frame allocation.
+    private readonly List<Vector3> _pathPositions = new();
+    private Vector3[] _pathPositionsArray = new Vector3[64];
+
+    private readonly List<Vector3> _arrowVerts = new();
+    private readonly List<int> _arrowTris = new();
+    private readonly List<Color> _arrowColors = new();
+    private static readonly Color ArrowColor = new(1f, 0.65f, 0f, 0.9f);
+
+    private void RefreshPathLine() {
+      if (_walker == null || Time.timeScale > 0f) {
+        _pathLine.enabled = false;
+        _arrowMeshRenderer.enabled = false;
+        return;
+      }
+
+      _pathPositions.Clear();
+      foreach (var corner in _walker.PathCorners) {
+        _pathPositions.Add(corner.Position);
+      }
+
+      if (_pathPositions.Count < 2) {
+        _pathLine.enabled = false;
+        _arrowMeshRenderer.enabled = false;
+        return;
+      }
+
+      if (_pathPositionsArray.Length < _pathPositions.Count)
+        _pathPositionsArray = new Vector3[_pathPositions.Count * 2];
+      _pathPositions.CopyTo(_pathPositionsArray);
+      _pathLine.positionCount = _pathPositions.Count;
+      _pathLine.SetPositions(_pathPositionsArray);
+      _pathLine.enabled = true;
+
+      BuildArrowMesh(_pathPositions);
+      _arrowMeshRenderer.enabled = true;
+    }
+
+    private void BuildArrowMesh(List<Vector3> positions) {
+      const float spacing  = 2.5f;  // world units between arrows
+      const float halfLen  = 0.35f; // half-length of arrow triangle
+      const float halfWide = 0.22f; // half-width of arrow triangle
+      const float yOffset  = 0.03f; // small lift to avoid z-fighting with path surface
+
+      _arrowVerts.Clear();
+      float accumulated = spacing * 0.5f; // start halfway in so first arrow isn't right at origin
+
+      for (var i = 0; i < positions.Count - 1; i++) {
+        var a = positions[i];
+        var b = positions[i + 1];
+        var seg = b - a;
+        var segLen = seg.magnitude;
+        if (segLen < 0.001f) continue;
+
+        var fwd  = seg / segLen;
+        // Right vector in the XZ plane regardless of slope
+        var right = new Vector3(-fwd.z, 0f, fwd.x).normalized;
+
+        while (accumulated <= segLen) {
+          var center = a + fwd * accumulated;
+          center.y += yOffset;
+
+          var tip      = center + fwd   * halfLen;
+          var baseLeft = center - fwd   * halfLen + right * halfWide;
+          var baseRight= center - fwd   * halfLen - right * halfWide;
+
+          var idx = _arrowVerts.Count;
+          _arrowVerts.Add(tip);
+          _arrowVerts.Add(baseLeft);
+          _arrowVerts.Add(baseRight);
+          _arrowColors.Add(ArrowColor);
+          _arrowColors.Add(ArrowColor);
+          _arrowColors.Add(ArrowColor);
+          _arrowTris.Add(idx); _arrowTris.Add(idx + 1); _arrowTris.Add(idx + 2);
+
+          accumulated += spacing;
+        }
+        accumulated -= segLen;
+      }
+
+      _arrowMesh.Clear();
+      _arrowMesh.SetVertices(_arrowVerts);
+      _arrowMesh.SetColors(_arrowColors);
+      _arrowMesh.SetTriangles(_arrowTris, 0);
+      _arrowMesh.RecalculateNormals();
+      _arrowMesh.RecalculateBounds();
     }
 
     private string GetTaskText(IExecutor executor) {
@@ -284,6 +412,8 @@ namespace grantemsley.BeaverTaskDisplay {
           if (behaviorName == "HaulWorkplaceBehavior" || behaviorName == "CarryRootBehavior") {
             var carrier = _behaviorManager.GetComponent<GoodCarrier>();
             prefixKey = (carrier != null && carrier.IsCarrying) ? HaulToLocKey : HaulFromLocKey;
+          } else if (behaviorName == "InventoryNeedBehavior") {
+            prefixKey = GetInventoryNeedPrefixKey();
           } else {
             WalkBehaviorPrefixKeys.TryGetValue(behaviorName, out prefixKey);
           }
@@ -341,6 +471,19 @@ namespace grantemsley.BeaverTaskDisplay {
       }
 
       return _loc.T(TaskPrefixLocKey, animName ?? executor.GetType().Name);
+    }
+
+    private string GetInventoryNeedPrefixKey() {
+      _behaviorManagerRunningBehaviorField ??= typeof(BehaviorManager).GetField(
+          "_runningBehavior", BindingFlags.NonPublic | BindingFlags.Instance);
+      var behavior = _behaviorManagerRunningBehaviorField?.GetValue(_behaviorManager);
+      if (behavior != null) {
+        _inventoryNeedBehaviorNeedIdField ??= behavior.GetType().GetField(
+            "_needId", BindingFlags.NonPublic | BindingFlags.Instance);
+        var needId = _inventoryNeedBehaviorNeedIdField?.GetValue(behavior) as string;
+        if (needId == "Thirst") return "grantemsley.BeaverTaskDisplay.Walk.DrinkAt";
+      }
+      return "grantemsley.BeaverTaskDisplay.Walk.EatAt";
     }
 
     private static BaseComponent TryGetDestinationEntity(IExecutor executor) => executor switch {
