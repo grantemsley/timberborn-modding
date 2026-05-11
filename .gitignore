@@ -10,8 +10,9 @@
 /Assets/Plugins*
 /Assets/Tools/ImportedAssets*
 
-# Visual Studio 2015 cache directory
+# Visual Studio cache directories (any depth)
 /.vs/
+**/.vs/
 
 # Visual Studio Code cache directory
 /.vscode/

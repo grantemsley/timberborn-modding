@@ -1,8 +1,8 @@
 # BeaverTaskDisplay mod
 
-A Timberborn 1.0 mod that adds a task description and clickable walking-destination row to the beaver info panel, positioned directly below the existing "Carrying" section. Click the destination text and the camera jumps to that entity.
+A Timberborn 1.0 mod that adds a task description row to the entity info panel, positioned directly below the existing "Carrying" section. Shows what the entity is currently doing and (when walking to a destination) a clickable destination name. Click the destination to jump the camera to it.
 
-The same panel works for any entity with both `BehaviorManager` and `Walker` components — beavers, bots, golems.
+Works for any entity with both `BehaviorManager` and `Walker` components — beavers, bots, golems.
 
 ---
 
@@ -57,7 +57,7 @@ public class BeaverTaskConfigurator : Configurator {
 }
 ```
 
-`AddBottomFragment(_, 100)` puts our row just below CarryingUI's `GoodCarrierFragment`, which uses order **0** in the same Bottom region (verified by reading the IL of `Timberborn.CarryingUI.CarryingUIConfigurator.EntityPanelModuleProvider.Get` — it loads `ldc.i4.0` immediately before `callvirt AddBottomFragment`).
+`AddBottomFragment(_, 100)` puts our row just below CarryingUI's `GoodCarrierFragment`, which uses order **0** in the same Bottom region (verified by reading the IL of `Timberborn.CarryingUI.CarryingUIConfigurator.EntityPanelModuleProvider.Get`).
 
 ### `BeaverTaskFragment`
 
@@ -66,9 +66,46 @@ Implements `IEntityPanelFragment`. The interface contract:
 | Method | When called | Our implementation |
 |---|---|---|
 | `InitializeFragment()` | Once at startup; returns the root `VisualElement` | Builds the NineSlice container with a task `Label` and destination `Label` |
-| `ShowFragment(BaseComponent entity)` | When the user selects an entity | Caches `BehaviorManager` + checks for `Walker`; shows the panel only if both exist |
-| `UpdateFragment()` | Every frame the panel is shown | Re-reads task and destination, refreshes labels |
-| `ClearFragment()` | When the panel is closed/another entity is selected | Clears state, hides the panel |
+| `ShowFragment(BaseComponent entity)` | When the user selects an entity | Caches `BehaviorManager` + checks for `Walker`; shows panel only if both exist |
+| `UpdateFragment()` | Every frame the panel is shown | Re-reads task and destination, refreshes labels and highlight |
+| `ClearFragment()` | When the panel is closed/another entity is selected | Clears state, hides the panel, removes destination highlight |
+
+### Task text resolution
+
+Task text is determined by a two-level lookup: **executor type** (the leaf action) and **behavior type** (the high-level intent).
+
+**Walking executors** (`WalkToAccessibleExecutor`, `WalkToReservableExecutor`, `WalkInsideExecutor`) check `RunningBehavior.Name` first to show intent rather than a generic "Walking to":
+- `CarryRootBehavior` / `HaulWorkplaceBehavior` → "Hauling from" or "Hauling to" (based on `GoodCarrier.IsCarrying`)
+- `SleepNeedBehavior` → "Walking to sleep at"
+- `InventoryNeedBehavior` → "Walking to eat at"
+- `AttractionNeedBehavior` → "Walking to visit"
+- `ProduceWorkplaceBehavior` / `LaborWorkplaceBehavior` / etc. → "Walking to work at"
+- `BuildBehavior` → "Walking to build at"
+- Unknown behavior → falls back to "Walking to" / "Entering" from `ExecutorLocKeys`
+
+**Position-walk executors** (`WalkToPositionExecutor`) also check behavior:
+- `PlantBehavior` / `PlanterWorkplaceBehavior` → "Walking to plant" (no entity destination)
+- `SleepNeedBehavior` → "Walking to sleep"
+- Unknown → "Walking"
+
+**`ApplyEffectExecutor`** (eating, drinking, sleeping, etc.) uses a three-tier fallback:
+1. `_animationName` private field → `AnimationLocKeys` (most specific)
+2. `_effects[].NeedId` → `NeedIdLocKeys` (slot-based buildings like medical bed have no animation)
+3. `_effects[0].NeedId` → `FactionNeedService.GetBeaverOrBotNeedById` (game's own display name for unmapped needs like "Lido", "WindTunnel")
+
+**Null executor** (between executors): checks `BehaviorOnlyLocKeys` for behaviors like `EmptyOutputWorkplaceBehavior` and `FillInputWorkplaceBehavior`.
+
+**All other executors** fall through to `ExecutorLocKeys` (Building, Planting, Harvesting, etc.).
+
+### Destination highlight
+
+When a destination entity is shown, `Highlighter.HighlightSecondary` applies a dark orange highlight to it. The highlight updates only when the destination changes, and is cleared on deselect via `UnhighlightAllSecondary`.
+
+**Known limitation:** When the destination is the beaver's home or workplace, `RelationHighlighter` also applies a blue primary highlight to the same building, which visually overrides our secondary orange. The task text still correctly identifies the destination; only the highlight is affected. This is a fundamental limitation of the highlight system's layering — `RelationHighlighter` re-applies its highlight via primary tier and cannot be overridden from a secondary context.
+
+### Behavior name discovery
+
+Behavior class names (`CarryRootBehavior`, `PlantBehavior`, etc.) are Timberborn internals that can only be discovered by DLL inspection or runtime logging. The `BeaverTaskFragment.cs` file contains a commented-out `BeaverTaskScanner` class that can be re-enabled to log new combinations. See the comment in `InitializeFragment` for instructions.
 
 ---
 
@@ -76,165 +113,114 @@ Implements `IEntityPanelFragment`. The interface contract:
 
 These are all derived from decompiling DLLs in `Assets/Plugins/Timberborn/`. Keeping this here so future iterations don't have to re-derive everything.
 
-### BehaviorManager — the source of "what task"
+### BehaviorManager
 
 `Timberborn.BehaviorSystem.BehaviorManager` is a `TickableComponent` on every beaver/bot.
 
 **Public API:**
-- `RunningExecutor` — returns `ExecutorInfo` **struct** with two fields: `Name` (string) and `ElapsedTime`. The `Name` is just `executor.GetType().Name` — a raw class name like `"WalkToAccessibleExecutor"`.
-- `RunningBehavior` — returns `BehaviorInfo` struct with a `Name` field. We don't currently use this; behaviors are higher-level than executors and would say things like `"WorkAtWorkplaceBehavior"` rather than the leaf action.
-- `IsRunningBehavior<TBehavior>()` and `IsRunningExecutor<TExecutor>()` — **both are generic** with no non-generic overload. (This bit me once — the compiler error was `cannot be inferred from the usage`.) We don't use these; we check `string.IsNullOrEmpty(RunningExecutor.Name)` instead.
+- `RunningExecutor` — returns `ExecutorInfo` struct with `Name` (string) and `ElapsedTime`. `Name` is `executor.GetType().Name` — a raw class name.
+- `RunningBehavior` — returns `BehaviorInfo` struct with `Name`. Behaviors are higher-level; e.g. `"CarryRootBehavior"` while the executor is `"WalkToAccessibleExecutor"`.
+- `IsRunningBehavior<TBehavior>()` and `IsRunningExecutor<TExecutor>()` — **both are generic** with no non-generic overload. Don't use these; check `string.IsNullOrEmpty(RunningExecutor.Name)` instead.
 
 **Private (read via reflection):**
-- `_runningExecutor` — the actual `IExecutor` instance. We must read this to inspect type-specific details on walking executors and `ApplyEffectExecutor`.
+- `_runningExecutor` — the actual `IExecutor` instance. Required to inspect walking executor destinations and `ApplyEffectExecutor` fields.
 
-`IExecutor` itself only has `Tick(float)`, `Save(...)`, `Load(...)` — no name, no destination. All useful state lives on the concrete subclasses.
+### Walking executors
 
-### Walker — the source of "where they're going"
+| Executor | DLL | Private field | Field type |
+|---|---|---|---|
+| `WalkToAccessibleExecutor` | WalkingSystem | `_accessible` | `Accessible` (BaseComponent) |
+| `WalkInsideExecutor` | WalkingSystem | `_buildingAccessible` | `Accessible` (BaseComponent) |
+| `WalkToReservableExecutor` | ReservableSystem | `_reservable` | `Reservable` (BaseComponent) |
+| `WalkToPositionExecutor` | WalkingSystem | (no entity) | Vector3 position only |
 
-`Timberborn.WalkingSystem.Walker` is also a `TickableComponent`.
+### Behavior names (confirmed via runtime logging)
 
-**Public API:**
-- `GoTo(IDestination)` — sets a new destination
-- `PathFollower`, `PathCorners`, `CurrentPathBounds`, `CurrentDestinationReachable` — path state
-- `StartedNewPath` event with `StartedNewPathEventArgs` (only carries `Distance`, no destination ref)
-- `Stopped()`, `StopMoving()`, `RefreshPath()`
-
-**Private:**
-- `_currentDestination` — the current `IDestination`. We don't currently read this; we read the executor's destination instead.
-
-### Walking executors — where the destination actually lives
-
-Three concrete walking executors, all in `Timberborn.WalkingSystem`:
-
-| Executor | Private field we read | Field type |
+| Behavior | Seen with executor | Meaning |
 |---|---|---|
-| `WalkToAccessibleExecutor` | `_accessible` | An `Accessible` component (BaseComponent) — the entity being walked toward |
-| `WalkInsideExecutor` | `_buildingAccessible` | Similar — the building the beaver is entering |
-| `WalkToPositionExecutor` | (no entity, just a position) | We currently show no destination row in this case |
+| `CarryRootBehavior` | WalkToAccessibleExecutor | Hauling goods |
+| `PlantBehavior` | WalkToPositionExecutor, PlantExecutor | Planting |
+| `PlanterWorkplaceBehavior` | WalkToReservableExecutor | Walking to planting zone |
+| `YieldRemoverBehavior` | WalkToReservableExecutor, RemoveYieldExecutor | Harvesting/logging |
+| `BuildBehavior` | WalkToAccessibleExecutor, BuildExecutor | Building |
+| `SleepNeedBehavior` | WalkInsideExecutor, WalkToPositionExecutor, ApplyEffectExecutor | Sleeping |
+| `InventoryNeedBehavior` | WalkInsideExecutor | Eating/drinking from building |
+| `AttractionNeedBehavior` | WalkInsideExecutor, ApplyEffectExecutor | Using an attraction |
+| `ProduceWorkplaceBehavior` | WalkInsideExecutor, ProduceExecutor | Workshop production |
+| `LaborWorkplaceBehavior` | WalkToReservableExecutor | Walking to workplace |
+| `WaitInsideIdlyWorkplaceBehavior` | WalkInsideExecutor, WaitExecutor | Idling inside |
+| `WanderRootBehavior` | WalkToPositionExecutor, WaitExecutor | Wandering |
+| `EmptyOutputWorkplaceBehavior` | (null executor) | Emptying workshop output |
+| `FillInputWorkplaceBehavior` | (null executor) | Filling workshop input |
 
-`IDestination` has two main implementations: `PositionDestination` (just a Vector3, no entity) and `AccessibleDestination` (has an `Accessible` entity reference). The walking executors store the relevant entity directly in their private fields, which is what we read.
+### ApplyEffectExecutor
 
-### NeedBehaviorSystem.ApplyEffectExecutor — the special case
+Handles all need-satisfaction activities. Private fields read via reflection:
+- `_animationName` — set by `TurnOnAnimation`; null for slot-based buildings (e.g. medical bed uses `TransformSlot` animation, not executor animation)
+- `_effects` — `IEnumerable<ContinuousEffect>` where `ContinuousEffect.NeedId` (string) identifies the need. NeedId values: `"Hunger"`, `"Thirst"`, `"Sleep"`, `"Injury"`, `"WetFur"`, `"Lido"`, `"MudBath"`, etc.
 
-This single executor handles eating, drinking, sleeping, bathing, healing, recreation — anything that "applies an effect to satisfy a need." All of them show up as `ApplyEffectExecutor` in `RunningExecutor.Name`.
+### GoodCarrier
 
-To distinguish the actual activity, we read the private `_animationName` string field. **The exact values aren't yet confirmed** — the loc dictionary `AnimationLocSuffixes` in the fragment lists guessed names (`"Eating"`, `"Sleeping"`, `"Bathing"`, etc.) which need verification by selecting a beaver doing each activity in-game.
+`Timberborn.Carrying.GoodCarrier` — `IsCarrying` (bool) tells us whether the entity is currently holding goods. Used to distinguish "Hauling from" (empty) vs "Hauling to" (loaded).
 
-If the real animation names use a different convention (`"eat"`, `"sleep_idle"`, `"BunkhouseBed"`), update the dictionary keys to match.
+### FactionNeedService
 
-Other ApplyEffectExecutor private fields, in case `_animationName` proves insufficient:
-- `_effects` — generic collection of effect objects (need to decompile further to know the element type and what it exposes)
-- `_enterer` — the building the beaver entered to apply the effect
-- `_finishTimestamp` — float, when the effect completes
-- `_characterAnimator` — likely the animator used for the activity
+`Timberborn.GameFactionSystem.FactionNeedService.GetBeaverOrBotNeedById(string needId)` — returns `NeedSpec` which has `DisplayNameLocKey`. Used to show the game's own localized name for unmapped needs (attractions, etc.).
 
-### EntitySelectionService — the click-to-focus call
+### RelationHighlighter
 
-`Timberborn.SelectionSystem.EntitySelectionService.SelectAndFocusOn(SelectableObject)` does what we want for the destination click.
+`Timberborn.RelationSystemUI.RelationHighlighter` applies a blue **primary** highlight to home/workplace when an entity is selected. It re-applies via `HighlightPrimary` on selection and relation-change events. Our secondary highlight cannot override it — see Known Limitations.
 
-To convert from an entity to a `SelectableObject`:
-- `SelectableObjectRetriever.TryGetSelectableObject(GameObject, out SelectableObject)` — **takes a GameObject, not a BaseComponent** (this also bit me once)
+### Highlighter
 
-So the call pattern is:
-```csharp
-if (_selectableObjectRetriever.TryGetSelectableObject(
-        _currentDestEntity.GameObject, out var sel)) {
-  _entitySelectionService.SelectAndFocusOn(sel);
-}
-```
+`Timberborn.SelectionSystem.Highlighter` — injected as a transient (each injection gets its own instance). Key methods:
+- `HighlightSecondary(BaseComponent, Color)` — adds a secondary highlight keyed to this instance
+- `UnhighlightAllSecondary()` — removes all secondary highlights added by this instance
+- `HighlightPrimary(BaseComponent, Color)` — adds a primary highlight (used by RelationHighlighter for blue; adding our own primary doesn't reliably override it due to render-order issues)
 
-### NamedEntity — the source of human-readable building names
+### Entity panel UI
 
-`Timberborn.EntityNaming.NamedEntity` is a component on most entities. Its `EntityName` property gives the localized display name (e.g. "Hauling Post", "Lumberjack Flag #2"). This is what we show as the destination label text.
-
-Fall back to `entity.GameObject.name` (Unity GameObject name) if `NamedEntity` isn't present — that's the prefab clone name, which is ugly but better than nothing.
-
-### BaseComponent — Timberborn's component base class
-
-Lives in `Timberborn.BaseComponentSystem`. **Not** Unity's `MonoBehaviour`-derived classes directly — it's its own thing for Timberborn entity components.
-
-Useful members:
-- `GameObject` (property, capital G — note this is the Unity GameObject, returned by a property getter, not a field)
-- `Name` (the GameObject's name)
-- `GetComponent<T>()`, `HasComponent<T>()`, `TryGetComponent<T>()`, `GetComponents<T>()`
-- `EnableComponent`, `DisableComponent`
-
-The `GetComponent<T>` here is Timberborn's own implementation, not Unity's. It works the same way at the call site though.
-
-### Localization (ILoc)
-
-`Timberborn.Localization.ILoc` is the DI-injected localization service:
-
-```csharp
-_loc.T("loc.key")                   // no params
-_loc.T("loc.key", arg1)             // one {0} substitution
-_loc.T("loc.key", arg1, arg2)       // two
-_loc.T("loc.key", arg1, arg2, arg3) // three
-```
-
-When the key isn't found, it returns the raw key (which is how I noticed the loc CSV wasn't loading — UI showed `grantemsley.BeaverTaskDisplay.Idle` literally instead of "Idle").
-
-Loc CSV files are in `Data/Localizations/<lang>_<suffix>.csv` with three columns:
-
-```csv
-ID,Text,Comment
-my.key,The text shown,Optional translator note
-my.key.with.params,Hello {0}!,Use double quotes around values containing commas
-```
-
-### EntityPanelModule.Builder — fragment positioning
-
-The builder has these methods (each takes `(IEntityPanelFragment, int order)`):
-
-```
-AddLeftHeaderFragment    AddRightHeaderFragment    AddMiddleHeaderFragment
-AddTopFragment           AddMiddleFragment         AddBottomFragment
-AddFooterFragment        AddSideFragment
-AddDiagnosticFragment    AddContentFragment
-```
-
-Order is ascending within a region. CarryingUI uses `AddBottomFragment(_, 0)`. We use `AddBottomFragment(_, 100)` to sit just below it with room for other mods to insert between.
+- Root: `NineSliceVisualElement` with `entity-sub-panel` and `bg-sub-box--green` CSS classes
+- Labels use `entity-panel__text` CSS class for correct font size (13px) — without it, the Medium-weight SDF font renders at the wrong size and appears heavier/bolder
+- `GoodCarrierFragment` uses `NineSliceLabel` (element IS the label); we use `NineSliceVisualElement` + two `Label` children in a horizontal flex row
 
 ---
 
 ## Decisions and rationale
 
-1. **Mod ID prefix `grantemsley.`** — recommended by Mod-directory-structure.md to use a username or domain prefix for global uniqueness across all mods.
+1. **Mod ID prefix `grantemsley.`** — recommended by Mod-directory-structure.md for global uniqueness.
 
-2. **Show panel for `BehaviorManager` + `Walker` (not "is beaver")** — bots and golems also benefit from the same info, and they all have these two components. No reason to gate on a beaver-specific component.
+2. **Show panel for `BehaviorManager` + `Walker`** — bots and golems also benefit; no reason to gate on a beaver-specific component.
 
-3. **Two separate labels rather than one combined line** — explicit user requirement from early in the project: "If we're showing the destination in a separate row, don't include it in the current task part. That would be redundant."
+3. **Two separate labels on one line** — task prefix in `_taskLabel`, destination name in `_destinationLabel`. Both inside a `flexDirection: Row, flexWrap: Wrap` container. Destination label is pale blue and clickable; task label is standard grey.
 
-4. **Destination shown only for `WalkTo*Executor` with an entity destination** — `WalkToPositionExecutor` only has a Vector3, no entity to focus on. We could do a reverse lookup ("what's at this tile?") to upgrade this case but it adds complexity for marginal value.
+4. **Behavior-based walking context** — `RunningBehavior.Name` gives the high-level intent when walking. This avoids showing a generic "Walking to Large Water Pump" with no indication of why.
 
-5. **Reflection on private fields, not Harmony patches** — the official modding tools build against the game DLLs as-is (no publicizing); private fields aren't accessible directly. Reflection is the standard fallback. The cached `FieldInfo` lookups happen once at type-init and incur no per-frame cost beyond the GetValue call.
+5. **`GoodCarrier.IsCarrying` for haul direction** — no public API exposes whether a haul walk is pickup vs delivery; the carrying state is the reliable proxy.
 
-6. **`ApplyEffectExecutor` distinguished by `_animationName`** — `RunningExecutor.Name` is just the class name, which is the same string for eating/drinking/sleeping/etc. The animation name appears to be the only field on the executor that varies between these. Confirmed values pending in-game testing.
+6. **Reflection on private fields** — the official modding tools build against unmodified game DLLs; private fields aren't accessible directly. All `FieldInfo` handles are cached as `static readonly` fields (cost paid once at type-init, not per frame). Lazily-initialized fields (ApplyEffectExecutor) are `static` non-readonly and initialized on first encounter.
 
-7. **Removed `alignItems = Align.FlexStart` from root** — it was sizing labels to their content's *minimum* width, causing internal text wrap. Default `Stretch` lets the labels fill the panel width and only wrap when actually too long.
+7. **`ApplyEffectExecutor` three-tier fallback** — animation name → NeedId map → FactionNeedService → raw type name. Covers both animation-based buildings (food tables, baths) and slot-based buildings (medical bed).
 
-8. **Removed inline padding overrides** — the `entity-sub-panel` USS class handles spacing consistently with the other sub-panels (carrying, etc.). My explicit `paddingLeft = 8` was misaligning our text vs the carrying section above.
+8. **`AddBottomFragment(_, 100)`** — gives room for other mods to insert between us and CarryingUI's order 0.
 
-9. **Pale blue color (no bold) for destination** — provides clickability hint without making the row visually heavy. Could add a hover effect later if the affordance feels too subtle.
-
-10. **`AddBottomFragment(_, 100)`, not 1** — gives breathing room for other mods to insert between us and CarryingUI's order 0 if they want to.
+9. **`entity-panel__text` CSS class on labels** — discovered via runtime debug (resolvedStyle.unityFontStyleAndWeight = Normal, fontSize = 13) that the "bold" appearance was actually the Medium SDF font rendering at the wrong size. Adding the game's own text class fixes it.
 
 ---
 
 ## Known limitations and risks
 
-- **Reflection fragility** — game patches could rename `_runningExecutor`, `_accessible`, `_buildingAccessible`, or `_animationName` without warning. The fragment is defensive (null checks throughout) so it'll silently degrade rather than crash, but the destination row or animation-name handling could stop working. Task name via the public `ExecutorInfo.Name` would still work since it doesn't depend on reflection.
+- **Reflection fragility** — game patches could rename `_runningExecutor`, `_accessible`, `_buildingAccessible`, `_reservable`, `_animationName`, or `_effects`. The fragment null-checks throughout so it degrades silently rather than crashing.
 
-- **`ApplyEffectExecutor` animation names are guessed** — `AnimationLocSuffixes` in the fragment is my best guess at what values appear. Verify in-game and update.
+- **Destination highlight overridden by blue** — when the walking destination is the entity's home or workplace, `RelationHighlighter`'s blue primary highlight overrides our secondary orange. The task text is still correct; only the highlight is affected.
 
-- **No `PositionDestination` handling** — beavers walking to a tile (rather than an entity) get no destination row. The task line still shows.
+- **Behavior names may change** — behavior class names (`CarryRootBehavior`, `PlantBehavior`, etc.) are internal strings discovered via runtime logging. A game update could rename them; unknown behaviors fall through to the generic "Walking to" fallback.
 
-- **English only** — only `enUS_BeaverTaskDisplay.csv`. Add other languages by creating files like `frFR_BeaverTaskDisplay.csv`, `deDE_BeaverTaskDisplay.csv`, etc.
+- **English only** — only `enUS_BeaverTaskDisplay.csv`. Add other languages by creating `frFR_BeaverTaskDisplay.csv`, `deDE_BeaverTaskDisplay.csv`, etc. All `Walk.*` loc keys are prefix strings (building name appended after); translator comments in the CSV explain this.
 
-- **No persistence or settings** — the panel always appears for entities with `BehaviorManager` + `Walker`. No toggle, no in-game options.
+- **No persistence or settings** — the panel always appears for entities with `BehaviorManager` + `Walker`.
 
-- **Editor compile vs Mod Builder** — the Unity Editor compile must succeed before the Mod Builder runs; otherwise you'll see "Error building Player because scripts have compile errors in the editor". Always check the Visual Studio Error List or Unity Console first.
+- **Editor compile vs Mod Builder** — the Unity Editor compile must succeed before the Mod Builder runs. Check the Visual Studio Error List or Unity Console first if the build fails.
 
 ---
 
@@ -243,13 +229,14 @@ Order is ascending within a region. CarryingUI uses `AddBottomFragment(_, 0)`. W
 ### Where things live on disk
 
 - **Modding repo (Unity project)**: `D:\claude\timberborn-modding`
-- **Game DLLs (decompilation targets)**: `D:\claude\timberborn-modding\Assets\Plugins\Timberborn\Timberborn.*.dll` — these are the actual game DLLs, imported by the modding tools. There are ~250 of them; the mod doesn't need most of them.
-- **Wiki (cloned)**: `D:\claude\timberborn-modding.wiki` — contains all the modding docs as markdown. Most useful: `Coding basics.md`, `Timberborn-architecture.md`, `User-interface.md`, `Mod-directory-structure.md`, `Translations.md`, `Mod-Builder.md`.
-- **Example mods**: `D:\claude\timberborn-modding\Assets\Mods\` — `HelloWorld` is the closest reference for fragments + DI patterns.
+- **Game DLLs**: `D:\claude\timberborn-modding\Assets\Plugins\Timberborn\Timberborn.*.dll` (~250 DLLs)
+- **Game files (USS, UXML, blueprints)**: `D:\claude\Timberborn\` — full game installation copy
+- **Wiki (cloned)**: `D:\claude\timberborn-modding.wiki\` — `Coding basics.md`, `User-interface.md`, `Mod-directory-structure.md`, `Translations.md`, `Mod-Builder.md` most useful
+- **Example mods**: `D:\claude\timberborn-modding\Assets\Mods\` — `HelloWorld` is the closest reference for fragments + DI
 
 ### How to inspect game DLLs
 
-For finding type/method/field names quickly, the Python `dnfile` package is fast:
+The Python `dnfile` package is fast for finding type/field/method names:
 
 ```python
 import dnfile
@@ -257,47 +244,29 @@ pe = dnfile.dnPE("Timberborn.SomeAssembly.dll")
 md = pe.net.mdtables
 for row in md.TypeDef.rows:
     name = str(row.TypeName)
-    # ...iterate methods via row.MethodList (list of MDTableIndex into MethodDef)
-    # ...iterate fields via row.FieldList
+    for field_ref in row.FieldList:
+        f = field_ref.row
+        if f: print(f.Name)
 ```
 
-For deeper inspection (method bodies, IL, decompiled C#), use **dnSpy** or **dnSpyEx** from `https://github.com/dnSpyEx/dnSpy/releases`. Open the DLL, navigate types, and dnSpy will decompile to readable C#.
+For method bodies and IL, use **dnSpyEx**: `https://github.com/dnSpyEx/dnSpy/releases`.
 
-### DLLs already inspected during this project
+USS/UXML files live in `D:\claude\Timberborn\` as part of the game installation (asset bundles), but the modding project's `Assets/Tools/ImportedAssets/Editor/Resources/UI/` contains `.uss.txt` and `.uxml.txt` copies of the editor-visible stylesheets — useful for understanding CSS classes.
 
-(For Claude Code: if you find yourself wondering about types in these, they've been touched before — likely safe to dig in.)
+### DLLs inspected during this project
 
-- `Timberborn.BehaviorSystem.dll` — `BehaviorManager`, `IExecutor`, `ExecutorInfo`, `BehaviorInfo`, `WaitExecutor`, `ExecutorExtensions`
-- `Timberborn.WalkingSystem.dll` — `Walker`, `WalkToAccessibleExecutor`, `WalkToPositionExecutor`, `WalkInsideExecutor`, `IDestination`, `PositionDestination`, `AccessibleDestination`
+- `Timberborn.BehaviorSystem.dll` — `BehaviorManager`, `IExecutor`, `ExecutorInfo`, `BehaviorInfo`
+- `Timberborn.WalkingSystem.dll` — `Walker`, `WalkToAccessibleExecutor`, `WalkToPositionExecutor`, `WalkInsideExecutor`
 - `Timberborn.NeedBehaviorSystem.dll` — `ApplyEffectExecutor`
-- `Timberborn.EntityPanelSystem.dll` — `EntityPanelModule.Builder`, `IEntityPanelFragment`, `EntityDescription`, `EntityDescriptionService`
-- `Timberborn.SelectionSystem.dll` — `EntitySelectionService`, `SelectableObject`, `SelectableObjectRetriever`
+- `Timberborn.ReservableSystem.dll` — `WalkToReservableExecutor`, `Reservable`
+- `Timberborn.EntityPanelSystem.dll` — `EntityPanelModule.Builder`, `IEntityPanelFragment`
+- `Timberborn.SelectionSystem.dll` — `EntitySelectionService`, `SelectableObject`, `SelectableObjectRetriever`, `Highlighter`, `HighlightableObject`
+- `Timberborn.RelationSystemUI.dll` — `RelationHighlighter` (uses HighlightPrimary for blue relation tint)
 - `Timberborn.EntityNaming.dll` — `NamedEntity`
-- `Timberborn.CarryingUI.dll` — `GoodCarrierFragment`, `CarryingUIConfigurator` (anchor for our positioning)
-- `Timberborn.Carrying.dll` — `GoodCarrier` (the underlying component, in case we want to read what's being carried)
-- `Timberborn.Localization.dll` — `ILoc`, `Loc`
-- `Timberborn.WorldPersistence.dll` — `INamedComponent` (where `ComponentName` comes from)
+- `Timberborn.CarryingUI.dll` — `GoodCarrierFragment` (reference for fragment positioning and NineSliceLabel pattern)
+- `Timberborn.Carrying.dll` — `GoodCarrier` (`IsCarrying` bool)
+- `Timberborn.GameFactionSystem.dll` — `FactionNeedService` (`GetBeaverOrBotNeedById`)
+- `Timberborn.NeedSpecs.dll` — `NeedSpec` (`DisplayNameLocKey`)
+- `Timberborn.Localization.dll` — `ILoc`
 - `Timberborn.BaseComponentSystem.dll` — `BaseComponent`
-
-Other executors that exist (found during enumeration) and could be added to the loc map if needed:
-
-| Executor | DLL | Likely meaning |
-|---|---|---|
-| `BuildExecutor` | ConstructionSites | Building a construction site |
-| `DemolishExecutor` | Demolishing | Tearing down |
-| `PlantExecutor` | Planting | Planting a sapling |
-| `WalkToReservableExecutor` | ReservableSystem | Walking to a workplace/reservable |
-| `WorkAtReservableExecutor` | ReservableSystem | Working at a reservable spot |
-| `ProduceExecutor` | Workshops | Producing goods |
-| `WorkExecutor` | Workshops | Generic work |
-| `RemoveYieldExecutor` | Yielding | Harvesting trees/crops |
-
----
-
-## Open follow-ups
-
-- Verify `_animationName` values for `ApplyEffectExecutor` and tune `AnimationLocSuffixes` accordingly.
-- Consider showing destination for `WalkToPositionExecutor` via a tile-to-entity reverse lookup (e.g. nearest building footprint).
-- Hover effect on the destination label (color shift or underline) for a clearer click affordance.
-- Mod settings system if/when the user wants a toggle.
-- Translations to other supported languages.
+- `Timberborn.Healthcare.dll` — investigated for healing executor; uses `ApplyEffectExecutor` with slot animation

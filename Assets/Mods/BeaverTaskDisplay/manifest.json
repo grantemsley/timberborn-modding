@@ -3,6 +3,7 @@
   "Version": "0.1.0.0",
   "Id": "grantemsley.BeaverTaskDisplay",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Adds a task and walking destination row to the beaver info panel, below the carrying section. Click the destination to focus the camera on it.",
+  "Author": "grantemsley",
+  "Description": "Adds a task description row to the entity info panel, below the carrying section. Shows what the entity is currently doing or walking to do (e.g. 'Hauling from Large Warehouse', 'Walking to work at Forge'). Clicking the destination focuses the camera on it. Works for beavers, bots, and golems.",
   "RequiredMods": []
 }
