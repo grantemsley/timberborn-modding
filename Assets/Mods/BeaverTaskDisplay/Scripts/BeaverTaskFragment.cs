@@ -360,61 +360,66 @@ namespace grantemsley.BeaverTaskDisplay {
     }
 
     private void BuildRibbonMesh(List<Vector3> positions) {
+      // Square-tube extrusion. Each cross-section is a small square perpendicular
+      // to the segment direction, so the tube's projected width is roughly
+      // consistent (~1.0–1.4×) from any camera angle. Replaces an earlier flat
+      // ribbon, which appeared thin on horizontal segments and wide on steep
+      // (zipline/stair) segments due to camera-angle foreshortening.
       const float halfWidth = 0.06f;
-      const float yOffset   = 0.01f;
       var color = new Color(1f, 0.65f, 0f, 0.9f);
 
       _ribbonVerts.Clear();
       _ribbonTris.Clear();
       _ribbonColors.Clear();
 
-      // Compute the XZ-plane right-side offset at each waypoint.
-      // Right vectors are normalized so the ribbon keeps a constant horizontal
-      // width even when a segment slopes up (e.g. ziplines, stairs) — an
-      // unnormalized right shrinks with slope and breaks the miter formula.
-      var offsets = new Vector3[positions.Count];
+      // 1. Build one orthonormal frame per waypoint and emit 4 verts per frame.
       for (var i = 0; i < positions.Count; i++) {
-        Vector3 right;
+        Vector3 fwd;
         if (i == 0) {
-          right = HorizontalRight((positions[1] - positions[0]).normalized);
+          fwd = (positions[1] - positions[0]).normalized;
         } else if (i == positions.Count - 1) {
-          right = HorizontalRight((positions[i] - positions[i - 1]).normalized);
+          fwd = (positions[i] - positions[i - 1]).normalized;
         } else {
-          var r1 = HorizontalRight((positions[i]     - positions[i - 1]).normalized);
-          var r2 = HorizontalRight((positions[i + 1] - positions[i]).normalized);
-          var sum = r1 + r2;
-          if (sum.sqrMagnitude < 0.0001f) {
-            right = r1; // segments fold back on themselves; just keep prior side
-          } else {
-            var miter = sum.normalized;
-            var dot   = Vector3.Dot(miter, r1);
-            // Cap miter length so sharp corners don't spike excessively.
-            right = miter * (dot > 0.2f ? 1f / dot : 5f);
-          }
+          var f1 = (positions[i]     - positions[i - 1]).normalized;
+          var f2 = (positions[i + 1] - positions[i]).normalized;
+          var sum = f1 + f2;
+          // Averaging the in/out directions smooths the frame across corners,
+          // reducing visible twist. Fall back to f1 on a 180° fold-back.
+          fwd = sum.sqrMagnitude < 0.0001f ? f1 : sum.normalized;
         }
-        offsets[i] = right * halfWidth;
+
+        var right = HorizontalRight(fwd);
+        var up    = Vector3.Cross(fwd, right).normalized;
+
+        var p = positions[i];
+        var rOff = right * halfWidth;
+        var uOff = up    * halfWidth;
+        _ribbonVerts.Add(p + rOff + uOff); // 0: TR
+        _ribbonVerts.Add(p - rOff + uOff); // 1: TL
+        _ribbonVerts.Add(p - rOff - uOff); // 2: BL
+        _ribbonVerts.Add(p + rOff - uOff); // 3: BR
+        _ribbonColors.Add(color); _ribbonColors.Add(color);
+        _ribbonColors.Add(color); _ribbonColors.Add(color);
       }
 
+      // 2. Connect consecutive cross-sections with 8 triangles per segment
+      //    (one quad per tube face). Winding is CCW from each face's outward
+      //    normal — purely for RecalculateNormals; Sprites/Default doesn't cull.
       for (var i = 0; i < positions.Count - 1; i++) {
-        var a = positions[i];
-        var b = positions[i + 1];
-        var oa = offsets[i];
-        var ob = offsets[i + 1];
-
-        // Four corners of this ribbon quad, flat in XZ, lifted by yOffset.
-        var v0 = new Vector3(a.x + oa.x, a.y + yOffset, a.z + oa.z);
-        var v1 = new Vector3(a.x - oa.x, a.y + yOffset, a.z - oa.z);
-        var v2 = new Vector3(b.x + ob.x, b.y + yOffset, b.z + ob.z);
-        var v3 = new Vector3(b.x - ob.x, b.y + yOffset, b.z - ob.z);
-
-        var idx = _ribbonVerts.Count;
-        _ribbonVerts.Add(v0); _ribbonVerts.Add(v1);
-        _ribbonVerts.Add(v2); _ribbonVerts.Add(v3);
-        _ribbonColors.Add(color); _ribbonColors.Add(color);
-        _ribbonColors.Add(color); _ribbonColors.Add(color);
-        // CCW from above so normals point up.
-        _ribbonTris.Add(idx);     _ribbonTris.Add(idx + 2); _ribbonTris.Add(idx + 1);
-        _ribbonTris.Add(idx + 1); _ribbonTris.Add(idx + 2); _ribbonTris.Add(idx + 3);
+        int a = i * 4;
+        int b = (i + 1) * 4;
+        // Top face (+up): a0,b0,b1,a1
+        _ribbonTris.Add(a + 0); _ribbonTris.Add(b + 0); _ribbonTris.Add(b + 1);
+        _ribbonTris.Add(a + 0); _ribbonTris.Add(b + 1); _ribbonTris.Add(a + 1);
+        // Left face (-right): a1,b1,b2,a2
+        _ribbonTris.Add(a + 1); _ribbonTris.Add(b + 1); _ribbonTris.Add(b + 2);
+        _ribbonTris.Add(a + 1); _ribbonTris.Add(b + 2); _ribbonTris.Add(a + 2);
+        // Bottom face (-up): a2,b2,b3,a3
+        _ribbonTris.Add(a + 2); _ribbonTris.Add(b + 2); _ribbonTris.Add(b + 3);
+        _ribbonTris.Add(a + 2); _ribbonTris.Add(b + 3); _ribbonTris.Add(a + 3);
+        // Right face (+right): a3,b3,b0,a0
+        _ribbonTris.Add(a + 3); _ribbonTris.Add(b + 3); _ribbonTris.Add(b + 0);
+        _ribbonTris.Add(a + 3); _ribbonTris.Add(b + 0); _ribbonTris.Add(a + 0);
       }
 
       _ribbonMesh.Clear();
