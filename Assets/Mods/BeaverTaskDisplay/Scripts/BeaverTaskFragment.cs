@@ -22,10 +22,12 @@ namespace grantemsley.BeaverTaskDisplay {
     private const string SubPanelClass = "entity-sub-panel";
     private const string SubBoxClass = "bg-sub-box--green";
 
-    private const string IdleLocKey = "grantemsley.BeaverTaskDisplay.Idle";
-    private const string WalkingToLocKey = "grantemsley.BeaverTaskDisplay.WalkingTo";
+    private const string IdleLocKey      = "grantemsley.BeaverTaskDisplay.Idle";
     private const string TaskPrefixLocKey = "grantemsley.BeaverTaskDisplay.TaskPrefix";
+    private const string HaulFromLocKey  = "grantemsley.BeaverTaskDisplay.Walk.HaulFrom";
+    private const string HaulToLocKey    = "grantemsley.BeaverTaskDisplay.Walk.HaulTo";
 
+    // Maps executor class name → loc key for non-walking executors.
     private static readonly Dictionary<string, string> ExecutorLocKeys = new() {
       { "WaitExecutor",              "grantemsley.BeaverTaskDisplay.Executor.Waiting" },
       { "BuildExecutor",             "grantemsley.BeaverTaskDisplay.Executor.Building" },
@@ -41,6 +43,9 @@ namespace grantemsley.BeaverTaskDisplay {
       { "RemoveYieldExecutor",       "grantemsley.BeaverTaskDisplay.Executor.Harvesting" },
     };
 
+    // Keys are the runtime values of ApplyEffectExecutor._animationName (a private field).
+    // These were confirmed by inspecting the game DLLs. If a key doesn't match, the
+    // NeedId fallback in GetApplyEffectTaskText is used instead.
     private static readonly Dictionary<string, string> AnimationLocKeys = new() {
       { "Eating",    "grantemsley.BeaverTaskDisplay.Animation.Eating" },
       { "Drinking",  "grantemsley.BeaverTaskDisplay.Animation.Drinking" },
@@ -51,8 +56,14 @@ namespace grantemsley.BeaverTaskDisplay {
       { "Resting",   "grantemsley.BeaverTaskDisplay.Animation.Resting" },
     };
 
-    // Prefix loc keys for entity-walking executors when behavior provides intent context.
-    // The building name is appended via _destinationLabel; translators write only the prefix.
+    // Behavior class names are Timberborn internals discovered by inspecting game DLLs
+    // and confirmed via runtime logging (BehaviorManager.RunningBehavior.Name).
+    // To discover new behavior names: uncomment the BeaverTaskScanner class and the
+    // scanner initialization in InitializeFragment, build the mod, and play. The scanner
+    // logs each new executor+behavior combination once to Player.log. Re-comment when done.
+    //
+    // These are prefix loc keys: the building name is appended via _destinationLabel.
+    // Translators write only the prefix; the building name always follows in the UI.
     private static readonly Dictionary<string, string> WalkBehaviorPrefixKeys = new() {
       { "LaborWorkplaceBehavior",          "grantemsley.BeaverTaskDisplay.Walk.WorkAt" },
       { "PlanterWorkplaceBehavior",        "grantemsley.BeaverTaskDisplay.Walk.WorkAt" },
@@ -69,6 +80,7 @@ namespace grantemsley.BeaverTaskDisplay {
     };
 
     // Complete text for WalkToPositionExecutor when behavior provides context.
+    // No building name is appended since position walks have no entity destination.
     private static readonly Dictionary<string, string> PositionWalkBehaviorKeys = new() {
       { "PlanterWorkplaceBehavior", "grantemsley.BeaverTaskDisplay.Walk.Plant" },
       { "SleepNeedBehavior",        "grantemsley.BeaverTaskDisplay.Walk.Sleep" },
@@ -80,9 +92,10 @@ namespace grantemsley.BeaverTaskDisplay {
       { "FillInputWorkplaceBehavior",   "grantemsley.BeaverTaskDisplay.Behavior.FillingInput" },
     };
 
-    // Fallback when _animationName is null (e.g. slot-based animations like the medical bed).
-    // Maps the NeedId of the first known effect to a display string.
-    // Buildings with unmapped NeedIds (e.g. "Lido") fall back to showing the NeedId itself.
+    // Reuses Animation.* loc keys since the display text is the same whether the beaver
+    // is actively eating (ApplyEffectExecutor with animation name) or was directed to eat
+    // via a slot-based building that sets no animation name (e.g. medical bed).
+    // Buildings with unmapped NeedIds (e.g. "Lido") fall back to the game's own display name.
     private static readonly Dictionary<string, string> NeedIdLocKeys = new() {
       { "Hunger",  "grantemsley.BeaverTaskDisplay.Animation.Eating" },
       { "Thirst",  "grantemsley.BeaverTaskDisplay.Animation.Drinking" },
@@ -91,6 +104,9 @@ namespace grantemsley.BeaverTaskDisplay {
       { "WetFur",  "grantemsley.BeaverTaskDisplay.Animation.Bathing" },
     };
 
+    // The game DLLs are not publicized, so private fields on game types must be accessed
+    // via reflection. These FieldInfo handles are cached statically so the lookup cost
+    // (GetField call) is paid once per type, not per frame.
     private static readonly FieldInfo BehaviorManagerRunningExecutorField =
         typeof(BehaviorManager).GetField(
             "_runningExecutor", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -111,7 +127,7 @@ namespace grantemsley.BeaverTaskDisplay {
     private static FieldInfo _applyEffectAnimNameField;
     private static FieldInfo _applyEffectEffectsField;
 
-    private static readonly Color DestinationHighlightColor = new(0.5f, 0.15f, 0f, 0.5f);
+    private static readonly Color DestinationHighlightColor = new(0.5f, 0.15f, 0f, 0.5f); // dark orange, semi-transparent
 
     private readonly EntitySelectionService _entitySelectionService;
     private readonly SelectableObjectRetriever _selectableObjectRetriever;
@@ -162,19 +178,29 @@ namespace grantemsley.BeaverTaskDisplay {
 
       _root.Add(row);
 
+      // To re-enable the behavior scanner (for discovering new executor+behavior names):
+      // uncomment the block below and the BeaverTaskScanner class at the bottom of this file,
+      // build the mod, then play and check Player.log for [BTD scan] lines.
+      //
+      // if (!_scannerStarted) {
+      //   _scannerStarted = true;
+      //   new GameObject("[BTD_Scanner]").AddComponent<BeaverTaskScanner>();
+      // }
+
       return _root;
     }
 
     public void ShowFragment(BaseComponent entity) {
-      _behaviorManager = entity.GetComponent<BehaviorManager>();
+      var bm = entity.GetComponent<BehaviorManager>();
       var walker = entity.GetComponent<Walker>();
-      if (_behaviorManager != null && walker != null) {
+      if (bm != null && walker != null) {
+        _behaviorManager = bm;
         _root.ToggleDisplayStyle(true);
         Refresh();
       }
     }
 
-public void ClearFragment() {
+    public void ClearFragment() {
       _behaviorManager = null;
       if (_currentDestEntity != null) {
         _highlighter.UnhighlightAllSecondary();
@@ -207,7 +233,7 @@ public void ClearFragment() {
       if (destEntity != null) {
         var named = destEntity.GetComponent<NamedEntity>();
         var displayName = named != null ? named.EntityName : destEntity.GameObject.name;
-        _destinationLabel.text = " " + _loc.T(WalkingToLocKey, displayName);
+        _destinationLabel.text = " " + displayName;
         _destinationLabel.style.display = DisplayStyle.Flex;
       } else {
         _destinationLabel.style.display = DisplayStyle.None;
@@ -242,9 +268,7 @@ public void ClearFragment() {
           string prefixKey = null;
           if (behaviorName == "HaulWorkplaceBehavior" || behaviorName == "CarryRootBehavior") {
             var carrier = _behaviorManager.GetComponent<GoodCarrier>();
-            prefixKey = (carrier != null && carrier.IsCarrying)
-                ? "grantemsley.BeaverTaskDisplay.Walk.HaulTo"
-                : "grantemsley.BeaverTaskDisplay.Walk.HaulFrom";
+            prefixKey = (carrier != null && carrier.IsCarrying) ? HaulToLocKey : HaulFromLocKey;
           } else {
             WalkBehaviorPrefixKeys.TryGetValue(behaviorName, out prefixKey);
           }
@@ -256,35 +280,7 @@ public void ClearFragment() {
       }
 
       if (typeName == "ApplyEffectExecutor") {
-        _applyEffectAnimNameField ??= executor.GetType().GetField(
-            "_animationName", BindingFlags.NonPublic | BindingFlags.Instance);
-        var animName = _applyEffectAnimNameField?.GetValue(executor) as string;
-        if (animName != null && AnimationLocKeys.TryGetValue(animName, out var animKey)) {
-          return _loc.T(TaskPrefixLocKey, _loc.T(animKey));
-        }
-
-        // _animationName is null when the building uses a slot-based animation (e.g. medical bed).
-        // Fall back to the NeedId of the first effect.
-        _applyEffectEffectsField ??= executor.GetType().GetField(
-            "_effects", BindingFlags.NonPublic | BindingFlags.Instance);
-        if (_applyEffectEffectsField?.GetValue(executor) is IEnumerable effects) {
-          string firstNeedId = null;
-          foreach (var effect in effects) {
-            var needId = effect?.GetType().GetProperty("NeedId")?.GetValue(effect) as string;
-            if (needId == null) continue;
-            firstNeedId ??= needId;
-            if (NeedIdLocKeys.TryGetValue(needId, out var needKey)) {
-              return _loc.T(TaskPrefixLocKey, _loc.T(needKey));
-            }
-          }
-          if (firstNeedId != null) {
-            var needSpec = _factionNeedService.GetBeaverOrBotNeedById(firstNeedId);
-            var needLocKey = needSpec?.DisplayNameLocKey;
-            return _loc.T(TaskPrefixLocKey, string.IsNullOrEmpty(needLocKey) ? firstNeedId : _loc.T(needLocKey));
-          }
-        }
-
-        return _loc.T(TaskPrefixLocKey, animName ?? typeName);
+        return GetApplyEffectTaskText(executor);
       }
 
       if (ExecutorLocKeys.TryGetValue(typeName, out var locKey)) {
@@ -294,19 +290,50 @@ public void ClearFragment() {
       return _loc.T(TaskPrefixLocKey, typeName);
     }
 
-    private static BaseComponent TryGetDestinationEntity(IExecutor executor) {
-      if (executor == null) return null;
-      switch (executor) {
-        case WalkToAccessibleExecutor walkAcc:
-          return WalkToAccessibleAccessibleField?.GetValue(walkAcc) as BaseComponent;
-        case WalkInsideExecutor walkIn:
-          return WalkInsideBuildingAccessibleField?.GetValue(walkIn) as BaseComponent;
-        case WalkToReservableExecutor walkRes:
-          return WalkToReservableReservableField?.GetValue(walkRes) as BaseComponent;
-        default:
-          return null;
+    // Determines the display text for ApplyEffectExecutor, which covers all need-satisfaction
+    // activities (eating, drinking, sleeping, bathing, healing, etc.).
+    //
+    // Fallback chain:
+    //   1. _animationName field → AnimationLocKeys (most specific; set for standard need buildings)
+    //   2. _effects[].NeedId → NeedIdLocKeys (slot-based buildings like medical bed have no animation)
+    //   3. _effects[0].NeedId → FactionNeedService display name (game's own name for unmapped needs)
+    //   4. Raw type name as last resort
+    private string GetApplyEffectTaskText(IExecutor executor) {
+      _applyEffectAnimNameField ??= executor.GetType().GetField(
+          "_animationName", BindingFlags.NonPublic | BindingFlags.Instance);
+      var animName = _applyEffectAnimNameField?.GetValue(executor) as string;
+      if (animName != null && AnimationLocKeys.TryGetValue(animName, out var animKey)) {
+        return _loc.T(TaskPrefixLocKey, _loc.T(animKey));
       }
+
+      _applyEffectEffectsField ??= executor.GetType().GetField(
+          "_effects", BindingFlags.NonPublic | BindingFlags.Instance);
+      if (_applyEffectEffectsField?.GetValue(executor) is IEnumerable effects) {
+        string firstNeedId = null;
+        foreach (var effect in effects) {
+          var needId = effect?.GetType().GetProperty("NeedId")?.GetValue(effect) as string;
+          if (needId == null) continue;
+          firstNeedId ??= needId;
+          if (NeedIdLocKeys.TryGetValue(needId, out var needKey)) {
+            return _loc.T(TaskPrefixLocKey, _loc.T(needKey));
+          }
+        }
+        if (firstNeedId != null) {
+          var needSpec = _factionNeedService.GetBeaverOrBotNeedById(firstNeedId);
+          var needLocKey = needSpec?.DisplayNameLocKey;
+          return _loc.T(TaskPrefixLocKey, string.IsNullOrEmpty(needLocKey) ? firstNeedId : _loc.T(needLocKey));
+        }
+      }
+
+      return _loc.T(TaskPrefixLocKey, animName ?? executor.GetType().Name);
     }
+
+    private static BaseComponent TryGetDestinationEntity(IExecutor executor) => executor switch {
+      WalkToAccessibleExecutor e => WalkToAccessibleAccessibleField?.GetValue(e) as BaseComponent,
+      WalkInsideExecutor e       => WalkInsideBuildingAccessibleField?.GetValue(e) as BaseComponent,
+      WalkToReservableExecutor e => WalkToReservableReservableField?.GetValue(e) as BaseComponent,
+      _                          => null,
+    };
 
     private void OnDestinationClicked() {
       if (_currentDestEntity == null) return;
@@ -316,5 +343,39 @@ public void ClearFragment() {
       }
     }
 
+    // -------------------------------------------------------------------------
+    // Debug scanner — uncomment to discover new executor+behavior combinations.
+    // See the comment in InitializeFragment for instructions.
+    // -------------------------------------------------------------------------
+    //
+    // private static bool _scannerStarted = false;
+    // private static readonly List<WeakReference<BehaviorManager>> _knownManagers = new();
+    //
+    // private class BeaverTaskScanner : MonoBehaviour {
+    //   private static readonly HashSet<string> _seen = new();
+    //   private static readonly FieldInfo RunExecField =
+    //       typeof(BehaviorManager).GetField("_runningExecutor",
+    //           BindingFlags.NonPublic | BindingFlags.Instance);
+    //   private float _timer;
+    //
+    //   private void Update() {
+    //     _timer += Time.deltaTime;
+    //     if (_timer < 3f) return;
+    //     _timer = 0f;
+    //     _knownManagers.RemoveAll(r => !r.TryGetTarget(out _));
+    //     foreach (var wr in _knownManagers.ToArray()) {
+    //       if (!wr.TryGetTarget(out var bm)) continue;
+    //       var exec = RunExecField?.GetValue(bm) as IExecutor;
+    //       var execName = exec?.GetType().Name ?? "";
+    //       if (execName is not ("WalkToAccessibleExecutor" or "WalkToReservableExecutor"
+    //                         or "WalkInsideExecutor" or "WalkToPositionExecutor")) continue;
+    //       var combo = $"{execName} | {bm.RunningBehavior.Name}";
+    //       if (_seen.Add(combo)) Debug.Log($"[BTD scan] {combo}");
+    //     }
+    //   }
+    // }
+    //
+    // To enable: uncomment above AND uncomment the scanner init block in InitializeFragment,
+    // AND add to ShowFragment: _knownManagers.Add(new WeakReference<BehaviorManager>(_behaviorManager));
   }
 }

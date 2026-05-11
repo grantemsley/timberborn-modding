@@ -1,23 +1,22 @@
 ID,Text,Comment
-grantemsley.BeaverTaskDisplay.Idle,Idle,Shown when the beaver has no current task.
-grantemsley.BeaverTaskDisplay.TaskPrefix,Task: {0},"Prefix for the task description. {0} is the task name."
-grantemsley.BeaverTaskDisplay.WalkingTo,{0},The destination entity name shown after the arrow.
+grantemsley.BeaverTaskDisplay.Idle,Idle,Shown when the entity has no current task.
+grantemsley.BeaverTaskDisplay.TaskPrefix,Task: {0},"Wraps all task descriptions. {0} is the task name. Translators can reorder or reword as needed."
 grantemsley.BeaverTaskDisplay.Executor.Waiting,Waiting,
 grantemsley.BeaverTaskDisplay.Executor.Building,Building,
 grantemsley.BeaverTaskDisplay.Executor.Demolishing,Demolishing,
 grantemsley.BeaverTaskDisplay.Executor.Planting,Planting,
-grantemsley.BeaverTaskDisplay.Executor.WalkingTo,Walking to,Used when the beaver is walking toward a reservable or accessible entity.
+grantemsley.BeaverTaskDisplay.Executor.WalkingTo,Walking to,"Fallback when walking to a building but the behavior type is not recognized. Building name follows."
 grantemsley.BeaverTaskDisplay.Executor.Working,Working,
-grantemsley.BeaverTaskDisplay.Executor.Entering,Entering,Walking into a building.
-grantemsley.BeaverTaskDisplay.Executor.Walking,Walking,Walking to a position with no specific entity destination.
+grantemsley.BeaverTaskDisplay.Executor.Entering,Entering,"Fallback when entering a building but the behavior type is not recognized. Building name follows."
+grantemsley.BeaverTaskDisplay.Executor.Walking,Walking,Fallback when walking to a position with no entity destination and no recognized behavior.
 grantemsley.BeaverTaskDisplay.Executor.Producing,Producing,
 grantemsley.BeaverTaskDisplay.Executor.Harvesting,Harvesting,
-grantemsley.BeaverTaskDisplay.Animation.Eating,Eating,
-grantemsley.BeaverTaskDisplay.Animation.Drinking,Drinking,
-grantemsley.BeaverTaskDisplay.Animation.Sleeping,Sleeping,
-grantemsley.BeaverTaskDisplay.Animation.Bathing,Bathing,
+grantemsley.BeaverTaskDisplay.Animation.Eating,Eating,Shown when eating. Also used for the Hunger need via slot-based buildings.
+grantemsley.BeaverTaskDisplay.Animation.Drinking,Drinking,Shown when drinking. Also used for the Thirst need via slot-based buildings.
+grantemsley.BeaverTaskDisplay.Animation.Sleeping,Sleeping,Shown when sleeping. Also used for the Sleep need via slot-based buildings.
+grantemsley.BeaverTaskDisplay.Animation.Bathing,Bathing,Shown when bathing. Also used for the WetFur need via slot-based buildings.
 grantemsley.BeaverTaskDisplay.Animation.HavingFun,Having fun,
-grantemsley.BeaverTaskDisplay.Animation.Healing,Healing,
+grantemsley.BeaverTaskDisplay.Animation.Healing,Healing,Shown when healing. Also used for the Injury need via slot-based buildings (e.g. medical bed).
 grantemsley.BeaverTaskDisplay.Animation.Resting,Resting,
 grantemsley.BeaverTaskDisplay.Walk.HaulFrom,Hauling from,"Prefix before building name when walking to pick up goods. Building name follows."
 grantemsley.BeaverTaskDisplay.Walk.HaulTo,Hauling to,"Prefix before building name when walking to deliver goods. Building name follows."
@@ -25,9 +24,9 @@ grantemsley.BeaverTaskDisplay.Walk.WorkAt,Walking to work at,"Prefix before buil
 grantemsley.BeaverTaskDisplay.Walk.BuildAt,Walking to build at,"Prefix before building name when walking to a construction site. Building name follows."
 grantemsley.BeaverTaskDisplay.Walk.DemolishAt,Walking to demolish at,"Prefix before building name when walking to demolish. Building name follows."
 grantemsley.BeaverTaskDisplay.Walk.HarvestAt,Walking to harvest at,"Prefix before building name when walking to harvest/gather/log. Building name follows."
-grantemsley.BeaverTaskDisplay.Walk.Plant,Walking to plant,Complete text shown when walking to a tile position to plant (no building destination).
+grantemsley.BeaverTaskDisplay.Walk.Plant,Walking to plant,Complete text when walking to a tile position to plant (no entity destination).
 grantemsley.BeaverTaskDisplay.Walk.Sleep,Walking to sleep,Complete text when walking to a sleep position with no building destination.
-grantemsley.BeaverTaskDisplay.Walk.SleepAt,Walking to sleep at,"Prefix before building name when walking to sleep. Building name follows."
+grantemsley.BeaverTaskDisplay.Walk.SleepAt,Walking to sleep at,"Prefix before building name when walking to sleep inside a building. Building name follows."
 grantemsley.BeaverTaskDisplay.Walk.EatAt,Walking to eat at,"Prefix before building name when walking to eat or drink. Building name follows."
 grantemsley.BeaverTaskDisplay.Walk.VisitAt,Walking to visit,"Prefix before building name when walking to an attraction. Building name follows."
 grantemsley.BeaverTaskDisplay.Behavior.EmptyingOutput,Emptying output,Shown when emptying a workshop's output with no active walking executor.
