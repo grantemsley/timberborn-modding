@@ -142,6 +142,9 @@ namespace grantemsley.BeaverTaskDisplay {
 
     private BehaviorManager _behaviorManager;
     private BaseComponent _currentDestEntity;
+    private string _cachedTaskText;
+    private string _lastExecutorName;
+    private string _lastBehaviorName;
 
     public BeaverTaskFragment(EntitySelectionService entitySelectionService,
                               SelectableObjectRetriever selectableObjectRetriever,
@@ -174,6 +177,8 @@ namespace grantemsley.BeaverTaskDisplay {
       _destinationLabel.AddToClassList("entity-panel__text");
       _destinationLabel.style.color = new Color(0.70f, 0.85f, 1f, 1f);
       _destinationLabel.RegisterCallback<ClickEvent>(_ => OnDestinationClicked());
+      _destinationLabel.RegisterCallback<MouseOverEvent>(_ => _destinationLabel.style.color = new Color(0.90f, 0.97f, 1f, 1f));
+      _destinationLabel.RegisterCallback<MouseOutEvent>(_ => _destinationLabel.style.color = new Color(0.70f, 0.85f, 1f, 1f));
       _destinationLabel.style.display = DisplayStyle.None;
       row.Add(_destinationLabel);
 
@@ -203,6 +208,8 @@ namespace grantemsley.BeaverTaskDisplay {
 
     public void ClearFragment() {
       _behaviorManager = null;
+      _lastExecutorName = null;
+      _lastBehaviorName = null;
       if (_currentDestEntity != null) {
         _highlighter.UnhighlightAllSecondary();
         _currentDestEntity = null;
@@ -219,7 +226,14 @@ namespace grantemsley.BeaverTaskDisplay {
 
     private void Refresh() {
       var actualExecutor = BehaviorManagerRunningExecutorField?.GetValue(_behaviorManager) as IExecutor;
-      _taskLabel.text = GetTaskText(actualExecutor);
+      var execName = _behaviorManager.RunningExecutor.Name;
+      var behaviorName = _behaviorManager.RunningBehavior.Name;
+      if (execName != _lastExecutorName || behaviorName != _lastBehaviorName) {
+        _lastExecutorName = execName;
+        _lastBehaviorName = behaviorName;
+        _cachedTaskText = GetTaskText(actualExecutor);
+      }
+      _taskLabel.text = _cachedTaskText;
 
       var destEntity = TryGetDestinationEntity(actualExecutor);
       if (destEntity != _currentDestEntity) {
