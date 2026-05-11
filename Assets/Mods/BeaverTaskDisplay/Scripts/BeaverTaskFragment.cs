@@ -82,6 +82,7 @@ namespace grantemsley.BeaverTaskDisplay {
     // Complete text for WalkToPositionExecutor when behavior provides context.
     // No building name is appended since position walks have no entity destination.
     private static readonly Dictionary<string, string> PositionWalkBehaviorKeys = new() {
+      { "PlantBehavior",            "grantemsley.BeaverTaskDisplay.Walk.Plant" },
       { "PlanterWorkplaceBehavior", "grantemsley.BeaverTaskDisplay.Walk.Plant" },
       { "SleepNeedBehavior",        "grantemsley.BeaverTaskDisplay.Walk.Sleep" },
     };
