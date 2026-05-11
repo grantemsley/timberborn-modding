@@ -209,9 +209,7 @@ namespace grantemsley.BeaverTaskDisplay {
       _arrowMesh = new Mesh { name = "BTD_ArrowMesh" };
       arrowGO.AddComponent<MeshFilter>().sharedMesh = _arrowMesh;
       _arrowMeshRenderer = arrowGO.AddComponent<MeshRenderer>();
-      _arrowMeshRenderer.sharedMaterial = new Material(Shader.Find("Sprites/Default")) {
-        color = new Color(1f, 0.65f, 0f, 0.9f)
-      };
+      _arrowMeshRenderer.sharedMaterial = _pathLine.sharedMaterial; // same shader/settings as the line
       _arrowMeshRenderer.enabled = false;
 
       // To re-enable the behavior scanner (for discovering new executor+behavior names):
@@ -232,6 +230,8 @@ namespace grantemsley.BeaverTaskDisplay {
       if (bm != null && walker != null) {
         _behaviorManager = bm;
         _walker = walker;
+        _walker.StartedNewPath += OnStartedNewPath;
+        CapturePathSnapshot();
         _root.ToggleDisplayStyle(true);
         Refresh();
       }
@@ -239,7 +239,11 @@ namespace grantemsley.BeaverTaskDisplay {
 
     public void ClearFragment() {
       _behaviorManager = null;
-      _walker = null;
+      if (_walker != null) {
+        _walker.StartedNewPath -= OnStartedNewPath;
+        _walker = null;
+      }
+      _cachedPathPositions.Clear();
       _lastExecutorName = null;
       _lastBehaviorName = null;
       _lastIsCarrying = false;
@@ -295,6 +299,9 @@ namespace grantemsley.BeaverTaskDisplay {
       RefreshPathLine();
     }
 
+    // Snapshot of the full path captured when a new path starts.
+    private readonly List<Vector3> _cachedPathPositions = new();
+
     // Reusable buffers to avoid per-frame allocation.
     private readonly List<Vector3> _pathPositions = new();
     private Vector3[] _pathPositionsArray = new Vector3[64];
@@ -302,7 +309,19 @@ namespace grantemsley.BeaverTaskDisplay {
     private readonly List<Vector3> _arrowVerts = new();
     private readonly List<int> _arrowTris = new();
     private readonly List<Color> _arrowColors = new();
-    private static readonly Color ArrowColor = new(1f, 0.65f, 0f, 0.9f);
+    // Premultiplied alpha: RGB × alpha, required by the Alpha Blended Premultiply shader.
+    private static readonly Color ArrowColor = new(0.9f, 0.585f, 0f, 0.9f);
+
+    private void OnStartedNewPath(object sender, StartedNewPathEventArgs e) {
+      CapturePathSnapshot();
+    }
+
+    private void CapturePathSnapshot() {
+      _cachedPathPositions.Clear();
+      if (_walker == null) return;
+      foreach (var corner in _walker.PathCorners)
+        _cachedPathPositions.Add(corner.Position);
+    }
 
     private void RefreshPathLine() {
       if (_walker == null || Time.timeScale > 0f) {
@@ -311,10 +330,14 @@ namespace grantemsley.BeaverTaskDisplay {
         return;
       }
 
-      _pathPositions.Clear();
-      foreach (var corner in _walker.PathCorners) {
-        _pathPositions.Add(corner.Position);
+      if (_cachedPathPositions.Count < 2) {
+        _pathLine.enabled = false;
+        _arrowMeshRenderer.enabled = false;
+        return;
       }
+
+      _pathPositions.Clear();
+      _pathPositions.AddRange(_cachedPathPositions);
 
       if (_pathPositions.Count < 2) {
         _pathLine.enabled = false;
