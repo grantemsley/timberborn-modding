@@ -152,8 +152,8 @@ namespace grantemsley.BeaverTaskDisplay {
     private string _lastBehaviorName;
     private bool _lastIsCarrying;
 
-    private LineRenderer _pathLine;
-    private GameObject _pathLineGO;
+    private Mesh _ribbonMesh;
+    private MeshRenderer _pathMeshRenderer;
     private Mesh _arrowMesh;
     private MeshRenderer _arrowMeshRenderer;
 
@@ -195,21 +195,18 @@ namespace grantemsley.BeaverTaskDisplay {
 
       _root.Add(row);
 
-      _pathLineGO = new GameObject("[BTD_PathLine]");
-      _pathLine = _pathLineGO.AddComponent<LineRenderer>();
-      _pathLine.material = new Material(Shader.Find("Legacy Shaders/Particles/Alpha Blended Premultiply"));
-      _pathLine.startColor = new Color(1f, 0.65f, 0f, 0.9f);
-      _pathLine.endColor   = new Color(1f, 0.65f, 0f, 0.9f);
-      _pathLine.startWidth = 0.25f;
-      _pathLine.endWidth   = 0.25f;
-      _pathLine.useWorldSpace = true;
-      _pathLine.enabled = false;
+      var pathGO = new GameObject("[BTD_PathLine]");
+      _ribbonMesh = new Mesh { name = "BTD_RibbonMesh" };
+      pathGO.AddComponent<MeshFilter>().sharedMesh = _ribbonMesh;
+      _pathMeshRenderer = pathGO.AddComponent<MeshRenderer>();
+      _pathMeshRenderer.sharedMaterial = new Material(Shader.Find("Sprites/Default"));
+      _pathMeshRenderer.enabled = false;
 
       var arrowGO = new GameObject("[BTD_PathArrows]");
       _arrowMesh = new Mesh { name = "BTD_ArrowMesh" };
       arrowGO.AddComponent<MeshFilter>().sharedMesh = _arrowMesh;
       _arrowMeshRenderer = arrowGO.AddComponent<MeshRenderer>();
-      _arrowMeshRenderer.sharedMaterial = _pathLine.sharedMaterial; // same shader/settings as the line
+      _arrowMeshRenderer.sharedMaterial = new Material(Shader.Find("Sprites/Default"));
       _arrowMeshRenderer.enabled = false;
 
       // To re-enable the behavior scanner (for discovering new executor+behavior names):
@@ -247,7 +244,7 @@ namespace grantemsley.BeaverTaskDisplay {
       _lastExecutorName = null;
       _lastBehaviorName = null;
       _lastIsCarrying = false;
-      _pathLine.enabled = false;
+      _pathMeshRenderer.enabled = false;
       _arrowMeshRenderer.enabled = false;
       if (_currentDestEntity != null) {
         _highlighter.UnhighlightAllSecondary();
@@ -304,13 +301,15 @@ namespace grantemsley.BeaverTaskDisplay {
 
     // Reusable buffers to avoid per-frame allocation.
     private readonly List<Vector3> _pathPositions = new();
-    private Vector3[] _pathPositionsArray = new Vector3[64];
+
+    private readonly List<Vector3> _ribbonVerts = new();
+    private readonly List<int>     _ribbonTris  = new();
+    private readonly List<Color>   _ribbonColors = new();
 
     private readonly List<Vector3> _arrowVerts = new();
     private readonly List<int> _arrowTris = new();
     private readonly List<Color> _arrowColors = new();
-    // Premultiplied alpha: RGB × alpha, required by the Alpha Blended Premultiply shader.
-    private static readonly Color ArrowColor = new(0.9f, 0.585f, 0f, 0.9f);
+    private static readonly Color ArrowColor = new(1f, 0.65f, 0f, 0.9f);
 
     private void OnStartedNewPath(object sender, StartedNewPathEventArgs e) {
       CapturePathSnapshot();
@@ -325,13 +324,13 @@ namespace grantemsley.BeaverTaskDisplay {
 
     private void RefreshPathLine() {
       if (_walker == null || Time.timeScale > 0f) {
-        _pathLine.enabled = false;
+        _pathMeshRenderer.enabled = false;
         _arrowMeshRenderer.enabled = false;
         return;
       }
 
       if (_cachedPathPositions.Count < 2) {
-        _pathLine.enabled = false;
+        _pathMeshRenderer.enabled = false;
         _arrowMeshRenderer.enabled = false;
         return;
       }
@@ -340,29 +339,101 @@ namespace grantemsley.BeaverTaskDisplay {
       _pathPositions.AddRange(_cachedPathPositions);
 
       if (_pathPositions.Count < 2) {
-        _pathLine.enabled = false;
+        _pathMeshRenderer.enabled = false;
         _arrowMeshRenderer.enabled = false;
         return;
       }
 
-      if (_pathPositionsArray.Length < _pathPositions.Count)
-        _pathPositionsArray = new Vector3[_pathPositions.Count * 2];
-      _pathPositions.CopyTo(_pathPositionsArray);
-      _pathLine.positionCount = _pathPositions.Count;
-      _pathLine.SetPositions(_pathPositionsArray);
-      _pathLine.enabled = true;
+      BuildRibbonMesh(_pathPositions);
+      _pathMeshRenderer.enabled = true;
 
       BuildArrowMesh(_pathPositions);
       _arrowMeshRenderer.enabled = true;
     }
 
+    // Unit-length right vector in the XZ plane, perpendicular to the horizontal
+    // component of `fwd`. Falls back to world +X when fwd points straight up/down.
+    private static Vector3 HorizontalRight(Vector3 fwd) {
+      var r = new Vector3(-fwd.z, 0f, fwd.x);
+      var sqMag = r.sqrMagnitude;
+      return sqMag < 0.0001f ? Vector3.right : r / Mathf.Sqrt(sqMag);
+    }
+
+    private void BuildRibbonMesh(List<Vector3> positions) {
+      const float halfWidth = 0.06f;
+      const float yOffset   = 0.01f;
+      var color = new Color(1f, 0.65f, 0f, 0.9f);
+
+      _ribbonVerts.Clear();
+      _ribbonTris.Clear();
+      _ribbonColors.Clear();
+
+      // Compute the XZ-plane right-side offset at each waypoint.
+      // Right vectors are normalized so the ribbon keeps a constant horizontal
+      // width even when a segment slopes up (e.g. ziplines, stairs) — an
+      // unnormalized right shrinks with slope and breaks the miter formula.
+      var offsets = new Vector3[positions.Count];
+      for (var i = 0; i < positions.Count; i++) {
+        Vector3 right;
+        if (i == 0) {
+          right = HorizontalRight((positions[1] - positions[0]).normalized);
+        } else if (i == positions.Count - 1) {
+          right = HorizontalRight((positions[i] - positions[i - 1]).normalized);
+        } else {
+          var r1 = HorizontalRight((positions[i]     - positions[i - 1]).normalized);
+          var r2 = HorizontalRight((positions[i + 1] - positions[i]).normalized);
+          var sum = r1 + r2;
+          if (sum.sqrMagnitude < 0.0001f) {
+            right = r1; // segments fold back on themselves; just keep prior side
+          } else {
+            var miter = sum.normalized;
+            var dot   = Vector3.Dot(miter, r1);
+            // Cap miter length so sharp corners don't spike excessively.
+            right = miter * (dot > 0.2f ? 1f / dot : 5f);
+          }
+        }
+        offsets[i] = right * halfWidth;
+      }
+
+      for (var i = 0; i < positions.Count - 1; i++) {
+        var a = positions[i];
+        var b = positions[i + 1];
+        var oa = offsets[i];
+        var ob = offsets[i + 1];
+
+        // Four corners of this ribbon quad, flat in XZ, lifted by yOffset.
+        var v0 = new Vector3(a.x + oa.x, a.y + yOffset, a.z + oa.z);
+        var v1 = new Vector3(a.x - oa.x, a.y + yOffset, a.z - oa.z);
+        var v2 = new Vector3(b.x + ob.x, b.y + yOffset, b.z + ob.z);
+        var v3 = new Vector3(b.x - ob.x, b.y + yOffset, b.z - ob.z);
+
+        var idx = _ribbonVerts.Count;
+        _ribbonVerts.Add(v0); _ribbonVerts.Add(v1);
+        _ribbonVerts.Add(v2); _ribbonVerts.Add(v3);
+        _ribbonColors.Add(color); _ribbonColors.Add(color);
+        _ribbonColors.Add(color); _ribbonColors.Add(color);
+        // CCW from above so normals point up.
+        _ribbonTris.Add(idx);     _ribbonTris.Add(idx + 2); _ribbonTris.Add(idx + 1);
+        _ribbonTris.Add(idx + 1); _ribbonTris.Add(idx + 2); _ribbonTris.Add(idx + 3);
+      }
+
+      _ribbonMesh.Clear();
+      _ribbonMesh.SetVertices(_ribbonVerts);
+      _ribbonMesh.SetColors(_ribbonColors);
+      _ribbonMesh.SetTriangles(_ribbonTris, 0);
+      _ribbonMesh.RecalculateNormals();
+      _ribbonMesh.RecalculateBounds();
+    }
+
     private void BuildArrowMesh(List<Vector3> positions) {
       const float spacing  = 2.5f;  // world units between arrows
-      const float halfLen  = 0.35f; // half-length of arrow triangle
-      const float halfWide = 0.22f; // half-width of arrow triangle
+      const float halfLen  = 0.20f; // half-length of arrow triangle
+      const float halfWide = 0.23f; // half-width — with halfLen gives roughly equilateral proportions
       const float yOffset  = 0.03f; // small lift to avoid z-fighting with path surface
 
       _arrowVerts.Clear();
+      _arrowColors.Clear();
+      _arrowTris.Clear();
       float accumulated = spacing * 0.5f; // start halfway in so first arrow isn't right at origin
 
       for (var i = 0; i < positions.Count - 1; i++) {

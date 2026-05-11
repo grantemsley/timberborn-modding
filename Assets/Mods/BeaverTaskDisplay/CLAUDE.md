@@ -230,6 +230,7 @@ Handles all need-satisfaction activities. Private fields read via reflection:
 
 - **Modding repo (Unity project)**: `D:\claude\timberborn-modding`
 - **Game DLLs**: `D:\claude\timberborn-modding\Assets\Plugins\Timberborn\Timberborn.*.dll` (~250 DLLs)
+- **Decompiled game source**: `D:\claude\timberborn-decompiled\` — one subfolder per DLL, one .cs per type; use Grep/Read here instead of inspecting DLLs directly
 - **Game files (USS, UXML, blueprints)**: `D:\claude\Timberborn\` — full game installation copy
 - **Wiki (cloned)**: `D:\claude\timberborn-modding.wiki\` — `Coding basics.md`, `User-interface.md`, `Mod-directory-structure.md`, `Translations.md`, `Mod-Builder.md` most useful
 - **Example mods**: `D:\claude\timberborn-modding\Assets\Mods\` — `HelloWorld` is the closest reference for fragments + DI
