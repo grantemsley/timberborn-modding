@@ -1,9 +1,9 @@
 {
-  "Name": "Beaver Task Display",
-  "Version": "0.1.0.0",
+  "Name": "Beaver Task Display [ModContest1]",
+  "Version": "1.0.0.0",
   "Id": "grantemsley.BeaverTaskDisplay",
   "MinimumGameVersion": "1.0.0.0",
   "Author": "grantemsley",
-  "Description": "Adds a task description row to the entity info panel, below the carrying section. Shows what the entity is currently doing or walking to do (e.g. 'Hauling from Large Warehouse', 'Walking to work at Forge'). Clicking the destination focuses the camera on it. Works for beavers, bots, and golems.",
+  "Description": "Ever wondered why a beaver is wandering off, or which warehouse a hauler is heading to? Beaver Task Display adds a task description row to every beaver's info panel, telling you exactly what they're doing and where they're going.\n\nClick on any beaver, bot, or golem and you'll see lines like 'Hauling from Large Warehouse', 'Walking to work at Forge', 'Walking to eat at Tavern', or 'Sleeping'. When they're walking somewhere, the destination is shown as a clickable link - click it to jump the camera to that building. The destination is also highlighted on the map so you can spot it instantly. Pause the game while a beaver is traveling and you'll see the route they plan to take.\n\nFeatures:\n- Shows the current task for beavers, bots, and golems\n- Recognises needs (eating, drinking, sleeping, attractions, medical care) and workplace types (production, planting, harvesting, building)\n- Clickable destination focuses the camera\n- Coloured highlight marks the destination building\n- Travel paths are shown when game is paused making it easy to see inefficient routes beavers are taking.\n\nCompatible with Timberborn 1.0+. English only at launch (translation contributions welcome on GitHub).",
   "RequiredMods": []
 }
