@@ -4,11 +4,11 @@ A Timberborn 1.0 mod that adds a 6th "Emergency" priority above Very High for co
 
 ## Status
 
-**Phase 1 complete (untested)** — scaffold, Emergency component, registry, UI toggle, construction-job override, schedule override. Mod has been written but never compiled or run.
+**Phase 1 in-game tested and working.** Beavers finish their current task and immediately switch to the emergency job, work past their schedule, and revert when the emergency clears. UI looks right: red "!" toggle, click-sound plays, standard priority deselects visually when Emergency is on, and clicking a standard priority clears Emergency. Save/load with persistent emergency flags still **untested** (flagged as the one in-game scenario worth verifying).
 
 **Phase 2 pending** — patch `BeaverNeedBehaviorPicker.ShouldPickEssentialAction` (suppress scheduled sleep) and `SleepNeedBehavior.ShouldSleepAtHome` (force the sleep-outside path so builders sleep near worksite instead of walking home).
 
-**Phase 3 pending** — patch `DistrictNeedBehaviorService.PickShortestAction` so beavers in critical food/water state grab the closest source regardless of preference.
+**Phase 3 pending** — patch `DistrictNeedBehaviorService.PickShortestAction` so beavers in critical food/water state grab the closest source regardless of preference, measured by `ActionDurationCalculator.DurationWithReturnInHours`.
 
 **Stretch/optional** — extend the Emergency toggle to the top-bar BuilderPrioritiesButton area tool (paint Emergency over an area). Not in scope for Phases 1–3.
 
@@ -22,7 +22,7 @@ Assets/Mods/EmergencyPriority/
 ├── manifest.json                                 # Id: grantemsley.EmergencyPriority; requires Harmony >= 2.3.0
 ├── Data/
 │   └── Localizations/
-│       └── enUS_EmergencyPriority.csv
+│       └── enUS_EmergencyPriority.csv            # dead data; no code reads it yet
 └── Scripts/
     ├── grantemsley.EmergencyPriority.asmdef     # autoReferenced: false, allowUnsafeCode: true
     ├── EmergencyConstructable.cs                # BaseComponent on construction sites
@@ -35,6 +35,7 @@ Assets/Mods/EmergencyPriority/
         ├── BuilderHubWorkplaceBehaviorPatch.cs  # prefix Decide → try emergency jobs first
         ├── BuilderPriorityToggleGroupFactoryPatch.cs  # postfix Create → inject 6th toggle
         ├── PriorityToggleGroupPatch.cs          # postfix Enable/Disable/UpdateGroup → dispatch to controller
+        ├── PriorityToggleSelectionPatch.cs      # postfix OnValueChanged → auto-clear Emergency on standard click
         └── WorkerRootBehaviorPatch.cs           # prefix Decide → bypass AreWorkingHours for builders
 ```
 
@@ -50,8 +51,9 @@ Unity project at `D:\claude\timberborn-modding`, Unity **6000.0.16f1**, `-langve
 
 1. Open the project in Unity.
 2. Wait for Package Manager to fetch `com.emka.timberborn-harmony` (declared in `Packages/manifest.json`). If it fails: Window → Package Manager → + → Add package from git URL → `https://github.com/eMkaQQ/timberborn-harmony.git`.
-3. Verify no compile errors in the Console.
-4. **Timberborn → Show Mod Builder** → tick "Emergency Priority" → **Build all**.
+3. If the Mod Builder doesn't list the mod, **focus the Project window and press Ctrl+R** (or right-click Assets → Refresh) so Unity generates `.meta` files and indexes the new mod folder. The Mod Builder only sees mods Unity knows about.
+4. Verify no compile errors in the Console.
+5. **Timberborn → Show Mod Builder** → tick "Emergency Priority" → **Build all**.
 
 At runtime, the player also needs the `Harmony` mod from mod.io or Steam Workshop installed (matches `manifest.json` `RequiredMods`).
 
@@ -65,11 +67,16 @@ Timberborn mods do **not** bundle their own `0Harmony.dll`. The community conven
 
 If we ever need to vendor Harmony (e.g. for a standalone distribution), drop `0Harmony.dll` into `Scripts/` and remove the RequiredMod entry — but don't do this if other Harmony mods will be active.
 
+When importing `HarmonyLib`, watch for `HarmonyLib.Priority` clashing with `Timberborn.PrioritySystem.Priority`. If both namespaces are in scope, add `using Priority = Timberborn.PrioritySystem.Priority;`.
+
 ### Two parallel priority systems
 
 The game already has a `Priority` enum (5 values: VeryLow…VeryHigh) consumed throughout compiled code. We can't extend it. Instead, Emergency is a **separate orthogonal bool flag** stored on each construction site via `EmergencyConstructable`. The base game's priority sort still runs; our Harmony prefixes inject emergency jobs ahead of the sort.
 
-When Emergency is cleared, the building reverts to its underlying `BuilderPrioritizable.Priority`. This means the UI shows two independent checked states: one from the regular priority radio group and one from the Emergency toggle. That's intentional — Emergency is a temporary boost on top of the normal priority.
+When Emergency is cleared, the building reverts to its underlying `BuilderPrioritizable.Priority`. The UI presents this as a single 6-option radio group:
+- Clicking a standard priority while Emergency is on auto-clears Emergency (patch on `PriorityToggle.OnValueChanged`).
+- Clicking the active Emergency toggle off leaves `BuilderPrioritizable.Priority` untouched, so it falls back to whichever standard priority was previously set.
+- While Emergency is on, the standard priority toggles' `priority-toggle--checked` class is stripped each frame so they look unselected.
 
 ### Component lifecycle (`EmergencyConstructable`)
 
@@ -80,7 +87,7 @@ Decorated onto every `ConstructionSite`. Implements:
 
 `SetEmergency(bool)` is the only external mutation entry point. It updates `IsEmergency` and, if the site is currently unfinished, registers or unregisters with `EmergencyConstructionRegistry`.
 
-Load order is `Awake → Load → OnEnterUnfinishedState`. By the time the state listener fires, `IsEmergency` is correctly loaded from the save and the registry gets populated. **Untested** on save-load; if `OnEnterUnfinishedState` doesn't fire on load (only on initial placement), saved emergencies won't register and we'd need to add an `IInitializableEntity.InitializeEntity` hook. The base game's `ConstructionRegistrar` uses the same pattern so this is expected to work.
+Load order is `Awake → Load → OnEnterUnfinishedState`. **Untested** on save-load; if `OnEnterUnfinishedState` doesn't fire on load (only on initial placement), saved emergencies won't register and we'd need to add an `IInitializableEntity.InitializeEntity` hook. The base game's `ConstructionRegistrar` uses the same pattern so this is expected to work.
 
 ### Registry (`EmergencyConstructionRegistry`)
 
@@ -88,12 +95,15 @@ Single `HashSet<ConstructionJob>`. Exposes `HasAny` (O(1)) and `EmergencyJobs` (
 
 Bound as singleton in `EmergencyPriorityConfigurator`. `EmergencyPatchBootstrap` (`ILoadableSingleton`) injects the registry and assigns it to the static `Registry` properties on `BuilderHubWorkplaceBehaviorPatch` and `WorkerRootBehaviorPatch` at scene load. This is the bridge between DI-resolved state and static Harmony patches.
 
-### The four Harmony patches
+Iteration order is undefined (HashSet); when multiple sites are flagged, the pick order is arbitrary. A `SortedSet<ConstructionJob>` keyed on `InstantiationOrder` would mirror the base game's tiebreaker if deterministic ordering becomes important.
+
+### The five Harmony patches
 
 | # | Target | Type | Purpose |
 |---|---|---|---|
-| 1a | `BuilderPriorityToggleGroupFactory.Create` | Postfix | Inject a 6th red toggle into the construction-site priority widget. Stores an `EmergencyToggleController` in a `ConditionalWeakTable<PriorityToggleGroup, EmergencyToggleController>` so dead groups from prior scene loads get garbage-collected. |
+| 1a | `BuilderPriorityToggleGroupFactory.Create` | Postfix | Inject a 6th red toggle into the construction-site priority widget. Loads `Game/EntityPanel/PriorityToggle` UXML via the reflected-out `VisualElementLoader` so the Toggle goes through `VisualElementInitializer` (registers `UISoundInitializer`'s click-sound callback). Stores an `EmergencyToggleController` in a `ConditionalWeakTable<PriorityToggleGroup, EmergencyToggleController>` so dead groups from prior scene loads get garbage-collected. |
 | 1b | `PriorityToggleGroup.{Enable,Disable,UpdateGroup}` | Postfix ×3 | Look up the controller for `__instance` and dispatch the lifecycle call. Workplace priority panels miss the lookup (not in the table) and are unaffected. |
+| 1c | `PriorityToggle.OnValueChanged` | Postfix | When the user picks one of the 5 standard priorities (`newValue = true`) on an entity that currently has Emergency set, clear the Emergency flag. Reads `_prioritizable` via reflection. |
 | 2 | `BuilderHubWorkplaceBehavior.Decide` | Prefix | If the registry has any jobs, iterate them and call `ConstructionJob.StartConstructionJob(agent, accessible)` directly. First accepting job short-circuits the original `Priorities.Descending` loop. Reads `_accessible` via reflection. |
 | 3 | `WorkerRootBehavior.Decide` | Prefix | If registry has any jobs AND the beaver's workplace contains a `BuilderHubWorkplaceBehavior` AND `!WorkRefuser.RefusesWork`, invoke private `DecideAsWorker()` via reflection — skipping the `AreWorkingHours` gate. Bots use the same code path, so they're also affected. |
 
@@ -101,15 +111,35 @@ Bound as singleton in `EmergencyPriorityConfigurator`. `EmergencyPatchBootstrap`
 
 ### Static-constructor reflection guards
 
-Each patch's static constructor logs `Debug.LogError` (or `LogWarning` for cosmetic reflection like the sprite loader) if any private field/method lookup returned null. The patch then gracefully no-ops. This makes a game-version-induced rename visible in the Unity log instead of mysteriously broken behavior.
+Each patch's static constructor logs `Debug.LogError` if any private field/method lookup returned null. The patch then gracefully no-ops. This makes a game-version-induced rename visible in the Unity log instead of mysteriously broken behavior.
 
 ### UI integration (`EmergencyToggleController`)
 
-Mirrors `PriorityToggle`'s lifecycle methods (`Enable(IPrioritizable)`, `Disable()`, `UpdateState()`) without subclassing or modifying `PriorityToggleGroup._toggles`. We create a vanilla `new Toggle()`, attach the standard `priority-toggle` and `content-centered` USS classes, hide its default Label (BaseField slot — class name varies by Unity version, so we hide any Label descendant), and tint both the toggle background and the checkmark image red.
+Mirrors `PriorityToggle`'s lifecycle methods (`Enable(IPrioritizable)`, `Disable()`, `UpdateState()`) without subclassing or modifying `PriorityToggleGroup._toggles`.
+
+Critical insight discovered during testing: we MUST load the toggle via `VisualElementLoader.LoadVisualElement("Game/EntityPanel/PriorityToggle")` rather than `new Toggle()`. The loader runs `VisualElementInitializer.InitializeVisualElement(element)` recursively, which registers `UISoundInitializer`'s `ClickEvent` callback. Without that, the toggle has no click sound. We reflect into the factory chain to reach the loader:
+
+```
+BuilderPriorityToggleGroupFactory
+  → _priorityToggleGroupFactory : PriorityToggleGroupFactory
+    → _visualElementLoader : VisualElementLoader
+```
+
+The loaded Toggle gets the right styles (`priority-toggle` and `content-centered` USS classes) and is registered with all `IVisualElementInitializer`s. We then:
+1. Hide its `unity-checkmark` child (`style.display = None`) so Unity's default checkmark glyph doesn't show through.
+2. Hide any Label descendant (BaseField slot — class name varies by Unity version, so we hide every Label).
+3. Tint the toggle's background-image color red (affects the `priority-toggle--checked` highlight).
+4. Add a centered, absolute, bold, red `Label("!")` as the icon. `PickingMode.Ignore` so clicks fall through to the underlying Toggle.
 
 The current entity's `EmergencyConstructable` is looked up via `(prioritizable as BaseComponent)?.GetComponent<EmergencyConstructable>()`. `IPrioritizable` is implemented by `BuilderPrioritizable : BaseComponent`, so the cast succeeds for construction sites.
 
-The 6th toggle uses the `VeryHigh` panel sprite (loaded via reflection on `BuilderPriorityToggleGroupFactory._builderPrioritySpriteLoader`) tinted red. If the sprite loader can't be found, the toggle still works but has no icon (logged as a warning).
+The 6th toggle hides itself (`style.display = None`) when the selected entity has no `EmergencyConstructable`. This is how we keep the button off `RecoveredGoodStackFragment` (rubble) and `DemolishableFragment` (demolition), which share `BuilderPriorityToggleGroupFactory` with `ConstructionSiteFragment`.
+
+### Sibling visual suppression
+
+When Emergency is on, `EmergencyToggleController.UpdateState` walks the `TogglesWrapper` children and removes the `priority-toggle--checked` class from every non-Emergency toggle. Since the standard `PriorityToggle.UpdateState` re-adds the class every frame, our controller has to do this every frame too — and we run via the `PriorityToggleGroup.UpdateGroup` postfix, which is after the per-toggle updates, giving us the last word.
+
+When Emergency is cleared, the standard toggles' `UpdateState` re-adds the class on the next frame automatically.
 
 ---
 
@@ -158,19 +188,24 @@ Top-to-bottom; first non-`ReleaseNow` wins:
 
 ### UI: priority toggle widget
 
-Two factories wrap the generic `PriorityToggleGroupFactory`:
-- `BuilderPriorityToggleGroupFactory` — used by [ConstructionSiteFragment](D:\claude\timberborn-decompiled\Timberborn.ConstructionSitesUI\Timberborn.ConstructionSitesUI\ConstructionSiteFragment.cs).
-- `WorkplacePriorityToggleGroupFactory` — used by `WorkplaceFragment`.
+Three panels use `BuilderPriorityToggleGroupFactory`:
+- `ConstructionSiteFragment` — construction sites (where we want Emergency)
+- `RecoveredGoodStackFragment` — rubble piles
+- `DemolishableFragment` — buildings flagged for demolition
 
-Patching the generic factory affects both. Patching the builder-specific factory is the right scope for Emergency.
+The Emergency toggle gets injected into all three but hides itself on the latter two (entity lacks `EmergencyConstructable`).
 
 The widget UXML loads `Game/EntityPanel/PriorityToggleGroup` (a `NineSliceVisualElement` containing a `Label` and a `TogglesWrapper`). Each toggle is its own UXML (`Game/EntityPanel/PriorityToggle`) — a `<ui:Toggle name="PriorityToggle" class="priority-toggle content-centered" />` with inline-styled background-image (the priority icon) and tint color.
 
 USS classes:
-- `.priority-toggle` — 24×24, with `--click-sound: "UI.Click"`
+- `.priority-toggle` — 24×24, with `--click-sound: "UI.Click"` (consumed by `UISoundInitializer`)
 - `.priority-toggle--checked` — adds background image `UI/Images/Game/priority-toggle-checked` (the "selected" highlight behind the icon)
 
-We construct toggles by hand with `new Toggle()` (no UXML loader available from a Harmony postfix without reflecting into the factory's `_visualElementLoader`).
+### `UISoundInitializer` and `VisualElementInitializer`
+
+`Timberborn.CoreUI.UISoundInitializer` is an `IVisualElementInitializer` that registers a `ClickEvent` callback on every visual element. The callback reads the `--click-sound` custom style property from the clicked element and plays it via `UISoundController`. Critically, this initializer only runs on elements that go through `VisualElementLoader.LoadVisualElement(...)`. Manually-instantiated `new Toggle()` skip the initializer pipeline entirely and have no click sound.
+
+The click-sound check requires `clickEvent.currentTarget == clickEvent.target` (click landed directly on the element with the registered handler). So putting an absolutely-positioned interactive Label over a Toggle would steal the sound — use `PickingMode.Ignore` on overlay elements.
 
 ### Persistence
 
@@ -194,7 +229,7 @@ We construct toggles by hand with `new Toggle()` (no UXML loader available from 
 
 5. **`ConstructionSite → EmergencyConstructable` template decoration.** Mirrors how `BuilderPrioritizable` is added via `ConstructionSitePrioritizableEnabler → BuilderPrioritizable`. The decorator ensures the component is present on every construction site at instantiation time.
 
-6. **Static-init reflection guards.** Game patches may rename `_accessible`, `_worker`, `_workRefuser`, `DecideAsWorker`, etc. Silent no-op is the worst failure mode for the user. A logged error tells them what to file a bug about.
+6. **Static-init reflection guards.** Game patches may rename `_accessible`, `_worker`, `_workRefuser`, `DecideAsWorker`, `_prioritizable`, etc. Silent no-op is the worst failure mode for the user. A logged error tells them what to file a bug about.
 
 7. **Don't patch `CriticalNeederRootBehavior`.** "Ignore needs as long as possible without dying" — the base game's critical-state detection is exactly the threshold we want. By keeping critical above our schedule override in the behavior tree, beavers always preempt for actual death-level needs.
 
@@ -204,25 +239,33 @@ We construct toggles by hand with `new Toggle()` (no UXML loader available from 
 
 10. **Phased rollout.** Phase 1 (emergency priority + schedule override) is the headline feature. Sleep-on-spot and closest-food are refinements. Splitting them limits risk per ship.
 
+11. **Load the toggle UXML, don't `new Toggle()`.** Discovered during testing: `new Toggle()` bypasses `VisualElementInitializer`, so it has no click sound. Reflect through the factory chain to get `VisualElementLoader` and load `Game/EntityPanel/PriorityToggle`.
+
+12. **Hide `unity-checkmark` and any Label descendants explicitly.** Unity's default `Toggle` renders a checkmark glyph and a label-slot child; both need to be hidden for the toggle to look like a clean square button.
+
+13. **Emergency-clears-on-standard-click is a separate Harmony patch.** `PriorityToggleSelectionPatch` postfixes `PriorityToggle.OnValueChanged` to auto-clear Emergency. This is more reliable than trying to react via `BuilderPrioritizable.PriorityChanged` (which would fire even when the priority is set programmatically, not just by user click).
+
+14. **Falling back from Emergency keeps `BuilderPrioritizable.Priority` untouched.** Toggling Emergency off only flips `EmergencyConstructable.IsEmergency`; the underlying priority is preserved, so the standard toggle that matches it re-asserts its checked visual next frame via `PriorityToggle.UpdateState`.
+
 ---
 
 ## Known limitations and risks
 
-- **Phase 1 has never been compiled or run.** First Unity open will catch compile errors. The most fragile areas to check: `using HarmonyLib;` resolution, Toggle internals (checkmark/label query), and whether the Mod Builder includes everything correctly.
-
-- **Save-load behavior is unverified.** If `OnEnterUnfinishedState` doesn't fire on save load, persistent emergencies don't register. Mitigation: add an `IInitializableEntity.InitializeEntity` hook that re-registers based on `IsEmergency`. Pattern matches base game's `ConstructionRegistrar` so probably works.
+- **Save-load behavior is unverified.** If `OnEnterUnfinishedState` doesn't fire on save load, persistent emergencies don't register. Mitigation: add an `IInitializableEntity.InitializeEntity` hook that re-registers based on `IsEmergency`. Pattern matches base game's `ConstructionRegistrar` so probably works. **First in-game scenario to verify.**
 
 - **Cross-mod Harmony patch ordering.** Any other mod patching the same methods may interact unpredictably with our prefixes, especially patch 3 returning `false` to skip the original — that short-circuits other prefixes too. Use Harmony priority annotations if conflicts arise.
 
 - **Reflection fragility.** All private-field access is reflection-based, cached in `static readonly` `FieldInfo` / `MethodInfo`. Static-init guards log when these are null.
 
-- **UI**: Toggle visual styling assumes Unity's default `Toggle` visual tree has a `unity-checkmark` child VisualElement. If a Unity version changes that, the icon won't appear (toggle still functional). Hidden Label slot may also reserve layout space in some Unity versions — visual check needed.
+- **Dead localization file.** `enUS_EmergencyPriority.csv` contains two entries that no code reads. Either remove or wire a tooltip on the Emergency toggle using `grantemsley.EmergencyPriority.EmergencyTooltip`.
 
 - **No top-bar area tool.** `BuilderPrioritiesButton` (paint priority over an area) doesn't have an Emergency option. Skipped intentionally for Phase 1.
 
 - **English only.** Add `frFR_*.csv`, `deDE_*.csv`, etc. in `Data/Localizations/` for translations.
 
-- **No tooltip on the Emergency toggle specifically.** Inherits the generic "Priorities" tooltip from the toggle wrapper. Cosmetic.
+- **HashSet iteration order is undefined.** When multiple sites are flagged, the pick order is arbitrary. Acceptable since "all emergency tasks are equally urgent" is consistent with intent.
+
+- **No `[HarmonyPriority]` annotations.** Our patches don't declare priority relative to other mods. Add `[HarmonyPriority]` if conflicts surface.
 
 ---
 
@@ -256,12 +299,15 @@ The non-critical path is untouched — only "critically hungry/thirsty" beavers 
 
 ### DLLs inspected during Phase 1
 
-- `Timberborn.PrioritySystem` / `PrioritySystemUI` — `Priority`, `IPrioritizable`, `PriorityToggleGroup`, `PriorityToggleGroupFactory`
+- `Timberborn.PrioritySystem` / `PrioritySystemUI` — `Priority`, `IPrioritizable`, `PriorityToggle`, `PriorityToggleGroup`, `PriorityToggleGroupFactory`
 - `Timberborn.BuilderPrioritySystem` / `BuilderPrioritySystemUI` — `BuilderPrioritizable`, `BuilderPriorityToggleGroupFactory`, `BuilderPrioritySpriteLoader`
 - `Timberborn.ConstructionSites` / `ConstructionSitesUI` — `ConstructionSite`, `ConstructionJob`, `ConstructionRegistrar`, `ConstructionRegistry`, `ConstructionSiteFragment`
 - `Timberborn.BuilderHubSystem` — `BuilderHubWorkplaceBehavior`, `BuildingJobProvider`, `IBuilderJobProvider`
 - `Timberborn.WorkSystem` / `WorkSystemUI` — `WorkerRootBehavior`, `Worker`, `Workplace`, `WorkRefuser`, `WorkerWorkingHours`, `WorkplacePriorityToggleGroupFactory`
 - `Timberborn.BehaviorSystem` — `BehaviorAgent`, `Behavior`, `Decision`, `BehaviorManager`, `RootBehavior`
+- `Timberborn.CoreUI` — `VisualElementLoader`, `VisualElementInitializer`, `UISoundInitializer`, `IVisualElementInitializer`
+- `Timberborn.UISound` — `UISoundController`
+- `Timberborn.RecoveredGoodSystemUI`, `Timberborn.DemolishingUI` — other consumers of `BuilderPriorityToggleGroupFactory`
 - `Timberborn.BeaverBehavior` — `BeaverBehaviorInitializer`, `BeaverNeedBehaviorPicker` (for Phase 2)
 - `Timberborn.SleepSystem` — `SleepNeedBehavior`, `Sleeper`, `SleeperSpec` (for Phase 2)
 - `Timberborn.NeedBehaviorSystem` — `CriticalNeederRootBehavior`, `NeederRootBehavior`, `DistrictNeedBehaviorService`, `Appraiser`, `NeedFilter` (for Phase 3)
@@ -284,5 +330,19 @@ The non-critical path is untouched — only "critically hungry/thirsty" beavers 
 
 - Memory files document persistent project conventions: see `~/.claude/projects/D--claude-timberborn-modding/memory/` for the no-Co-Authored-By rule, decompiled-source-only investigation, prefer-bash-over-PowerShell, and the Harmony-as-shared-dependency convention.
 - Plan major behavior changes with the user before writing patches. Phased rollouts (Phase 1 ship → test → Phase 2) reduce blast radius when patches go wrong.
-- Self-review (`/anthropic-skills:code-review`) catches things like the `is not Worker worker` pattern footgun before the first compile.
+- Self-review (`/anthropic-skills:code-review`) catches things like the `is not Worker worker` pattern footgun before the first compile. Use `as` casts instead.
 - When verifying claims about Unity / Harmony / external libs against the web, prefer authoritative sources (mod's own README, NuGet for Lib.Harmony, Microsoft docs for C# spec).
+- After creating new files in `Assets/`, the user usually needs to refresh Unity (Ctrl+R in the Project window) before the Mod Builder lists the new mod. Don't manually create `.meta` files; let Unity generate them.
+
+### Git workflow
+
+The user works in the main repo at `D:\claude\timberborn-modding\`, NOT inside `.claude/worktrees/`. The worktree is session-side scaffolding; files there are separate from what the user opens in Unity. Always run `git status` from the main repo path.
+
+When committing, exclude:
+- Unrelated changes (other mods' edits that aren't part of the current task)
+- `.claude/worktrees/...` (session infrastructure)
+
+Include:
+- `Packages/manifest.json` and `Packages/packages-lock.json` if Unity package dependencies changed
+- `timberborn-modding.slnx` if a new project was added to the solution
+- All mod files and `.meta` files under `Assets/Mods/<mod-name>/`
