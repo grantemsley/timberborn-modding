@@ -4,9 +4,9 @@ A Timberborn 1.0 mod that adds a 6th "Emergency" priority above Very High for co
 
 ## Status
 
-**Phase 1 in-game tested and working.** Beavers finish their current task and immediately switch to the emergency job, work past their schedule, and revert when the emergency clears. UI looks right: red "!" toggle, click-sound plays, standard priority deselects visually when Emergency is on, and clicking a standard priority clears Emergency. Save/load with persistent emergency flags still **untested** (flagged as the one in-game scenario worth verifying).
+**Phase 1 in-game tested and working.** Beavers finish their current task and immediately switch to the emergency job, work past their schedule, and revert when the emergency clears. UI looks right: red "!" toggle, click-sound plays, standard priority deselects visually when Emergency is on, and clicking a standard priority clears Emergency. Save/load preserves Emergency flags across reloads.
 
-**Phase 2 complete (untested)** — patches on `BeaverNeedBehaviorPicker.ShouldPickEssentialAction` (suppress scheduled sleep) and `SleepNeedBehavior.ShouldSleepAtHome` (force the sleep-outside path so builders sleep near worksite instead of walking home).
+**Phase 2 in-game tested and working.** Patches on `BeaverNeedBehaviorPicker.ShouldPickEssentialAction` suppress scheduled sleep; `SleepNeedBehavior.ShouldSleepAtHome` + `SleepNeedBehavior.SleepOutside` make emergency builders sleep on the spot at the worksite instead of walking back near home.
 
 **Phase 3 pending** — patch `DistrictNeedBehaviorService.PickShortestAction` so beavers in critical food/water state grab the closest source regardless of preference, measured by `ActionDurationCalculator.DurationWithReturnInHours`.
 
