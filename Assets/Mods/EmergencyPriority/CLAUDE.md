@@ -8,7 +8,7 @@ A Timberborn 1.0 mod that adds a 6th "Emergency" priority above Very High for co
 
 **Phase 2 in-game tested and working.** Patches on `BeaverNeedBehaviorPicker.ShouldPickEssentialAction` suppress scheduled sleep; `SleepNeedBehavior.ShouldSleepAtHome` + `SleepNeedBehavior.SleepOutside` make emergency builders sleep on the spot at the worksite instead of walking back near home.
 
-**Phase 3 pending** — patch `DistrictNeedBehaviorService.PickShortestAction` so beavers in critical food/water state grab the closest source regardless of preference, measured by `ActionDurationCalculator.DurationWithReturnInHours`.
+**Phase 3 in-game tested and working.** Patch on `DistrictNeedBehaviorService.PickShortestAction` makes emergency builders in critical food/water state grab the globally-closest source (shortest `ActionDurationCalculator.DurationWithReturnInHours`) instead of the vanilla "highest-points group → shortest in that group" path. Non-emergency beavers and the non-critical path are unchanged.
 
 **Stretch/optional** — extend the Emergency toggle to the top-bar BuilderPrioritiesButton area tool (paint Emergency over an area). Not in scope for Phases 1–3.
 
@@ -36,9 +36,10 @@ Assets/Mods/EmergencyPriority/
         ├── BeaverNeedBehaviorPickerPatch.cs     # prefix ShouldPickEssentialAction → suppress scheduled sleep for emergency builders
         ├── BuilderHubWorkplaceBehaviorPatch.cs  # prefix Decide → try emergency jobs first
         ├── BuilderPriorityToggleGroupFactoryPatch.cs  # postfix Create → inject 6th toggle
+        ├── DistrictNeedBehaviorServicePatch.cs  # prefix PickShortestAction → closest food/water for emergency builders in critical state
         ├── PriorityToggleGroupPatch.cs          # postfix Enable/Disable/UpdateGroup → dispatch to controller
         ├── PriorityToggleSelectionPatch.cs      # postfix OnValueChanged → auto-clear Emergency on standard click
-        ├── SleepNeedBehaviorPatch.cs            # prefix ShouldSleepAtHome → force SleepOutside path for emergency builders
+        ├── SleepNeedBehaviorPatch.cs            # prefix ShouldSleepAtHome + prefix SleepOutside → sleep on the spot for emergency builders
         └── WorkerRootBehaviorPatch.cs           # prefix Decide → bypass AreWorkingHours for builders
 ```
 
@@ -112,10 +113,11 @@ Iteration order is undefined (HashSet); when multiple sites are flagged, the pic
 | 4 | `BeaverNeedBehaviorPicker.ShouldPickEssentialAction` | Prefix | For emergency-employed builders, skip the `ItIsTimeForEssentialAction` (scheduled-sleep-near-dawn) trigger. Sleep only wins when `EssentialActionIsAtMinimumPoints` says the need has actually bottomed out. Reflection on `_appraiser`, `_needManager`, `Appraiser.AppraiseEffect`, `NeedManager.NeedIsAtMinimumPoints`. |
 | 5a | `SleepNeedBehavior.ShouldSleepAtHome` | Prefix | For emergency-employed builders, return `false` to force the SleepOutside path. `GetEssentialAction` also routes through this, so the essential action's position becomes "here, now" rather than home. |
 | 5b | `SleepNeedBehavior.SleepOutside` | Prefix | For emergency-employed builders, pre-set `_walkedToSleepingPosition = true` so the original method skips `WalkToRandomSleepingPosition` and goes straight to `Sleep()` at the current position. Without this, `RandomDestinationPicker.GetCoordinates` anchors the random destination on the beaver's *home* (not the worksite), dragging emergency builders back near home before sleeping. `Sleep()` resets the flag, so normal beavers are unaffected. |
+| 6 | `DistrictNeedBehaviorService.PickShortestAction` | Prefix | When `onlyNeedsInCriticalState == true` AND the calling beaver is an emergency builder, scan all groups in `_appraisedNeedBehaviors` and return the globally shortest-duration action (by `ActionDurationCalculator.DurationWithReturnInHours`). Vanilla iterates groups in descending-points order and returns the highest-points group's shortest behavior, which can drag a starving builder past closer food to their favorite. Reflection on the private nested struct `AppraisedNeedBehaviorGroup` (`NeedBehaviorGroup`/`Points` properties) and the private `_appraisedNeedBehaviors` field. |
 
 `CriticalNeederRootBehavior` runs above `WorkerRootBehavior` in the behavior tree, so beavers in critical-need state still preempt the emergency override. That's how we get "ignore needs but don't die": critical state always wins.
 
-Patches 4 and 5 share `EmergencyBuilderCheck.IsEmergencyBuilder(entity, registry)` — checks that the registry has any jobs, the entity has a `Worker` employed at a workplace containing a `BuilderHubWorkplaceBehavior`. `BeaverNeedBehaviorPicker` and `SleepNeedBehavior` are both `BaseComponent`s on the beaver entity, so `GetComponent<Worker>()` works.
+Patches 4, 5, and 6 share `EmergencyBuilderCheck.IsEmergencyBuilder(entity, registry)` — checks that the registry has any jobs and the entity has a `Worker` employed at a workplace containing a `BuilderHubWorkplaceBehavior`. `BeaverNeedBehaviorPicker`, `SleepNeedBehavior`, and `NeedManager` are all `BaseComponent`s on the beaver entity, so `GetComponent<Worker>()` works for each.
 
 ### Static-constructor reflection guards
 
@@ -274,14 +276,6 @@ The click-sound check requires `clickEvent.currentTarget == clickEvent.target` (
 - **HashSet iteration order is undefined.** When multiple sites are flagged, the pick order is arbitrary. Acceptable since "all emergency tasks are equally urgent" is consistent with intent.
 
 - **No `[HarmonyPriority]` annotations.** Our patches don't declare priority relative to other mods. Add `[HarmonyPriority]` if conflicts surface.
-
----
-
-## Phase 3 plan (closest food)
-
-- **`DistrictNeedBehaviorService.PickShortestAction`** (prefix) — if the calling beaver (via `needManager.Owner`) is a builder in emergency mode AND `onlyNeedsInCriticalState` is true, replace the points-sorted iteration with a globally-shortest-duration scan across all `_appraisedNeedBehaviors`. Set `__result` and return false. Use `ActionDurationCalculator.DurationWithReturnInHours` for consistency with game's existing logic.
-
-The non-critical path is untouched — only "critically hungry/thirsty" beavers ignore preference.
 
 ---
 
