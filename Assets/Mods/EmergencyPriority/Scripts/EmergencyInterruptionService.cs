@@ -9,7 +9,6 @@ using Timberborn.Goods;
 using Timberborn.InventorySystem;
 using Timberborn.Navigation;
 using Timberborn.NeedBehaviorSystem;
-using Timberborn.NeedSystem;
 using Timberborn.RecoveredGoodSystem;
 using Timberborn.SingletonSystem;
 using Timberborn.WorkSystem;
@@ -23,8 +22,14 @@ namespace grantemsley.EmergencyPriority {
   // in the same district, so they re-evaluate immediately instead of finishing
   // their nap and only then noticing the emergency.
   //
-  // Critical-state beavers are skipped — they'd just resume their critical-need
-  // behavior on re-evaluation, and interrupting them is wasted work.
+  // We deliberately don't skip critical-state beavers: a beaver early in a
+  // sleep cycle has Sleep need points at the minimum, which makes
+  // Need.IsInCriticalState true for Sleep, which made AnyNeedIsInCriticalState
+  // return true and silently skip the interrupt — the exact bug the user hit.
+  // For genuinely critical-needs beavers (e.g., starving), CriticalNeederRoot
+  // Behavior simply wins again on the next re-decide and they resume the
+  // critical-need behavior, costing one tick. That's a fine trade for making
+  // sleep interruption actually work.
   //
   // Interruption is done by setting ApplyEffectExecutor._finishTimestamp to 0.
   // On the next BehaviorManager.Tick, the executor's own Tick() observes the
@@ -106,10 +111,6 @@ namespace grantemsley.EmergencyPriority {
       }
       var behaviorManager = worker.GetComponent<BehaviorManager>();
       if (behaviorManager == null) {
-        return;
-      }
-      var needManager = worker.GetComponent<NeedManager>();
-      if (needManager != null && needManager.AnyNeedIsInCriticalState()) {
         return;
       }
       var executor = RunningExecutorField.GetValue(behaviorManager);
