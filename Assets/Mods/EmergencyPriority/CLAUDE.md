@@ -140,7 +140,7 @@ The loaded Toggle gets the right styles (`priority-toggle` and `content-centered
 2. Hide any Label descendant (BaseField slot — class name varies by Unity version, so we hide every Label).
 3. Tint the toggle's background-image color red (affects the `priority-toggle--checked` highlight).
 4. Add a centered, absolute, bold, red `Label("!")` as the icon. `PickingMode.Ignore` so clicks fall through to the underlying Toggle.
-5. Register a localizable tooltip via `ITooltipRegistrar.RegisterLocalizable(toggle, "grantemsley.EmergencyPriority.EmergencyTooltip")`. The registrar is wired into the static `BuilderPriorityToggleGroupFactoryPatch.TooltipRegistrar` by `EmergencyPatchBootstrap`. Null-safe — if the registrar isn't wired yet, the toggle still works without a tooltip.
+5. Register a localizable tooltip via `ITooltipRegistrar.RegisterLocalizable(toggle, "grantemsley.EmergencyPriority.EmergencyTooltip")`. The registrar is wired into the static `BuilderPriorityToggleGroupFactoryPatch.TooltipRegistrar` by `EmergencyPatchBootstrap`. Important ordering note: `EntityPanel` is itself an `ILoadableSingleton` and calls `InitializeFragment` on every fragment during `Load()`, which fires our Postfix and builds the toggle. Mod singletons load *after* core singletons, so the registrar is null at that point. We queue toggles into `PendingTooltipToggles` when the registrar is null and drain the queue when `EmergencyPatchBootstrap.Load` later assigns the registrar via the static setter.
 
 The current entity's `EmergencyConstructable` is looked up via `(prioritizable as BaseComponent)?.GetComponent<EmergencyConstructable>()`. `IPrioritizable` is implemented by `BuilderPrioritizable : BaseComponent`, so the cast succeeds for construction sites.
 

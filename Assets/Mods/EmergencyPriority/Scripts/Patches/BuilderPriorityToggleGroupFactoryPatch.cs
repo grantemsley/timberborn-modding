@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
@@ -37,9 +38,25 @@ namespace grantemsley.EmergencyPriority.Patches {
     private const string PriorityToggleUxmlPath = "Game/EntityPanel/PriorityToggle";
     private const string EmergencyTooltipLocKey = "grantemsley.EmergencyPriority.EmergencyTooltip";
 
-    // Wired by EmergencyPatchBootstrap.Load. Null until then; tooltip
-    // registration silently skips, which is fine — the toggle still works.
-    public static ITooltipRegistrar TooltipRegistrar { get; set; }
+    // Toggles awaiting tooltip registration. EntityPanel is also an
+    // ILoadableSingleton and may initialize its fragments (calling our
+    // Postfix) BEFORE our EmergencyPatchBootstrap.Load assigns the registrar.
+    // We queue the toggle in that case and drain on assignment.
+    private static readonly List<Toggle> PendingTooltipToggles = new List<Toggle>();
+    private static ITooltipRegistrar _tooltipRegistrar;
+
+    public static ITooltipRegistrar TooltipRegistrar {
+      get => _tooltipRegistrar;
+      set {
+        _tooltipRegistrar = value;
+        if (value != null) {
+          for (int i = 0; i < PendingTooltipToggles.Count; i++) {
+            value.RegisterLocalizable(PendingTooltipToggles[i], EmergencyTooltipLocKey);
+          }
+          PendingTooltipToggles.Clear();
+        }
+      }
+    }
 
     // PriorityToggleGroup → its emergency controller. Weak so dead groups (from
     // previous scene loads) are collected and don't accumulate over a session.
@@ -113,8 +130,17 @@ namespace grantemsley.EmergencyPriority.Patches {
       // red so the selection state matches the icon color.
       toggle.style.unityBackgroundImageTintColor = new StyleColor(EmergencyRed);
       AddIcon(toggle);
-      TooltipRegistrar?.RegisterLocalizable(toggle, EmergencyTooltipLocKey);
+      RegisterTooltip(toggle);
       return toggle;
+    }
+
+    private static void RegisterTooltip(Toggle toggle) {
+      var registrar = _tooltipRegistrar;
+      if (registrar != null) {
+        registrar.RegisterLocalizable(toggle, EmergencyTooltipLocKey);
+      } else {
+        PendingTooltipToggles.Add(toggle);
+      }
     }
 
     // Render a red bold "!" centered inside the 24x24 toggle.
