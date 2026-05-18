@@ -2,10 +2,15 @@ using System.Reflection;
 using Timberborn.BehaviorSystem;
 using Timberborn.BuilderHubSystem;
 using Timberborn.Carrying;
+using Timberborn.Common;
 using Timberborn.ConstructionSites;
 using Timberborn.GameDistricts;
+using Timberborn.Goods;
+using Timberborn.InventorySystem;
+using Timberborn.Navigation;
 using Timberborn.NeedBehaviorSystem;
 using Timberborn.NeedSystem;
+using Timberborn.RecoveredGoodSystem;
 using Timberborn.SingletonSystem;
 using Timberborn.WorkSystem;
 using UnityEngine;
@@ -39,9 +44,12 @@ namespace grantemsley.EmergencyPriority {
         typeof(ApplyEffectExecutor).GetField("_finishTimestamp", AnyInstance);
 
     private readonly EmergencyConstructionRegistry _registry;
+    private readonly RecoveredGoodStackSpawner _recoveredGoodStackSpawner;
 
-    public EmergencyInterruptionService(EmergencyConstructionRegistry registry) {
+    public EmergencyInterruptionService(EmergencyConstructionRegistry registry,
+                                        RecoveredGoodStackSpawner recoveredGoodStackSpawner) {
       _registry = registry;
+      _recoveredGoodStackSpawner = recoveredGoodStackSpawner;
     }
 
     public void Load() {
@@ -72,9 +80,8 @@ namespace grantemsley.EmergencyPriority {
       if (districtBuildingRegistry == null) {
         return;
       }
-      foreach (var hub in districtBuildingRegistry.GetEnabledBuildings<BuilderHubWorkplaceBehavior>()) {
-        var workplace = hub.GetComponent<Workplace>();
-        if (workplace == null) {
+      foreach (var workplace in districtBuildingRegistry.GetEnabledBuildings<Workplace>()) {
+        if (!HasBuilderHubBehavior(workplace)) {
           continue;
         }
         foreach (var worker in workplace.AssignedWorkers) {
@@ -83,7 +90,17 @@ namespace grantemsley.EmergencyPriority {
       }
     }
 
-    private static void TryInterrupt(Worker worker) {
+    private static bool HasBuilderHubBehavior(Workplace workplace) {
+      ReadOnlyList<WorkplaceBehavior> behaviors = workplace.WorkplaceBehaviors;
+      for (int i = 0; i < behaviors.Count; i++) {
+        if (behaviors[i] is BuilderHubWorkplaceBehavior) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    private void TryInterrupt(Worker worker) {
       if (worker == null) {
         return;
       }
@@ -105,13 +122,59 @@ namespace grantemsley.EmergencyPriority {
         FinishTimestampField.SetValue(applyEffectExecutor, 0f);
         return;
       }
-      // Hauling: cancel the walk executor so the beaver re-decides immediately.
-      // The CarryRootBehavior prefix then returns ReleaseNow (unless this haul
-      // is destined for the emergency site itself), and WorkerRootBehavior
-      // picks up the emergency.
+      // Hauling: if the destination is an emergency site, leave it alone —
+      // that haul is feeding the emergency. Otherwise drop the cargo on the
+      // ground as a recovered-good stack, release reservations, and null
+      // the executor so the beaver re-decides immediately into WorkerRootBehavior.
       var runningBehavior = RunningBehaviorField?.GetValue(behaviorManager);
       if (runningBehavior is CarryRootBehavior) {
+        if (IsHaulingToEmergencySite(worker)) {
+          return;
+        }
+        DropCargoAndReleaseReservations(worker);
         RunningExecutorField.SetValue(behaviorManager, null);
+      }
+    }
+
+    private bool IsHaulingToEmergencySite(Worker worker) {
+      var reserver = worker.GetComponent<GoodReserver>();
+      if (reserver == null || !reserver.HasReservedCapacity) {
+        return false;
+      }
+      var destInventory = reserver.CapacityReservation.Inventory;
+      if (destInventory == null) {
+        return false;
+      }
+      var destJob = destInventory.GetComponent<ConstructionJob>();
+      if (destJob == null) {
+        return false;
+      }
+      foreach (var emergencyJob in _registry.EmergencyJobs) {
+        if (emergencyJob == destJob) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    private void DropCargoAndReleaseReservations(Worker worker) {
+      var goodCarrier = worker.GetComponent<GoodCarrier>();
+      if (goodCarrier != null && goodCarrier.IsCarrying) {
+        var carried = goodCarrier.CarriedGoods;
+        if (carried.Amount > 0) {
+          var gridPos = NavigationCoordinateSystem.WorldToGridInt(worker.Transform.position);
+          _recoveredGoodStackSpawner.AddAwaitingGoods(gridPos, new[] { carried });
+        }
+        goodCarrier.EmptyHands();
+      }
+      var reserver = worker.GetComponent<GoodReserver>();
+      if (reserver != null) {
+        if (reserver.HasReservedCapacity) {
+          reserver.UnreserveCapacity();
+        }
+        if (reserver.HasReservedStock) {
+          reserver.UnreserveStock();
+        }
       }
     }
 
