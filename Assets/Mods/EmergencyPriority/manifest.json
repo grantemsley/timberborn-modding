@@ -1,0 +1,14 @@
+{
+  "Name": "Emergency Priority",
+  "Version": "0.1.0.0",
+  "Id": "grantemsley.EmergencyPriority",
+  "MinimumGameVersion": "1.0.0.0",
+  "Author": "grantemsley",
+  "Description": "Adds a new Emergency priority above Very High for construction sites. Beavers and bots assigned to a Builder Hub will work emergency-flagged construction jobs first, ignoring their working hours and scheduled sleep until needs become critical.",
+  "RequiredMods": [
+    {
+      "Id": "Harmony",
+      "MinimumVersion": "2.3.0"
+    }
+  ]
+}

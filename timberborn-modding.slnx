@@ -1,5 +1,6 @@
 ﻿<Solution>
   <Project Path="Timberborn.ModExamples.ShantySpeaker.csproj" />
+  <Project Path="grantemsley.EmergencyPriority.csproj" />
   <Project Path="Timberborn.ModExamples.HelloWorld.csproj" />
   <Project Path="Timberborn.ModdingTools.AssetsManagement.csproj" />
   <Project Path="Timberborn.ModdingTools.Common.csproj" />

@@ -1,0 +1,3 @@
+ID,Text,Comment
+grantemsley.EmergencyPriority.Emergency,Emergency,"Label for the Emergency priority toggle on construction sites."
+grantemsley.EmergencyPriority.EmergencyTooltip,"Emergency: builders work this job before everything else, ignoring their schedule and skipping sleep until critically tired.",Tooltip for the Emergency priority toggle.

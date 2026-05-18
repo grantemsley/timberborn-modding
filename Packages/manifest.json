@@ -21,6 +21,7 @@
     "com.unity.modules.umbra": "1.0.0",
     "com.unity.modules.unitywebrequestwww": "1.0.0",
     "com.unity.modules.vectorgraphics": "1.0.0",
-    "com.unity.modules.video": "1.0.0"
+    "com.unity.modules.video": "1.0.0",
+    "com.emka.timberborn-harmony": "https://github.com/eMkaQQ/timberborn-harmony.git"
   }
 }
