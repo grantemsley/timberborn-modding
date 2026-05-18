@@ -12,6 +12,7 @@ namespace grantemsley.EmergencyPriority {
       Bind<EmergencyConstructionRegistry>().AsSingleton();
       Bind<EmergencyConstructable>().AsTransient();
       MultiBind<ILoadableSingleton>().To<EmergencyPatchBootstrap>().AsSingleton();
+      MultiBind<ILoadableSingleton>().To<EmergencyInterruptionService>().AsSingleton();
       MultiBind<TemplateModule>().ToProvider(ProvideTemplateModule).AsSingleton();
     }
 

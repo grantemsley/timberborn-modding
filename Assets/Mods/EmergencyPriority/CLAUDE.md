@@ -27,7 +27,8 @@ Assets/Mods/EmergencyPriority/
     ├── grantemsley.EmergencyPriority.asmdef     # autoReferenced: false, allowUnsafeCode: true
     ├── EmergencyBuilderCheck.cs                 # shared helper: is this beaver an employed builder while emergency jobs exist?
     ├── EmergencyConstructable.cs                # BaseComponent on construction sites
-    ├── EmergencyConstructionRegistry.cs         # singleton; HashSet of emergency-flagged ConstructionJobs
+    ├── EmergencyConstructionRegistry.cs         # singleton; HashSet of emergency-flagged ConstructionJobs + JobRegistered event
+    ├── EmergencyInterruptionService.cs          # ILoadableSingleton; on JobRegistered, wakes builders mid-sleep/eat in the same district
     ├── EmergencyPatchBootstrap.cs               # ILoadableSingleton that hands registry to static patch fields
     ├── EmergencyPriorityConfigurator.cs         # Bindito DI + ConstructionSite→EmergencyConstructable decorator
     ├── EmergencyPriorityModStarter.cs           # IModStarter; calls Harmony.PatchAll
@@ -100,6 +101,25 @@ Single `HashSet<ConstructionJob>`. Exposes `HasAny` (O(1)) and `EmergencyJobs` (
 Bound as singleton in `EmergencyPriorityConfigurator`. `EmergencyPatchBootstrap` (`ILoadableSingleton`) injects the registry and assigns it to the static `Registry` properties on `BuilderHubWorkplaceBehaviorPatch` and `WorkerRootBehaviorPatch` at scene load. This is the bridge between DI-resolved state and static Harmony patches.
 
 Iteration order is undefined (HashSet); when multiple sites are flagged, the pick order is arbitrary. A `SortedSet<ConstructionJob>` keyed on `InstantiationOrder` would mirror the base game's tiebreaker if deterministic ordering becomes important.
+
+`Register` fires a `JobRegistered` event when a new job is added (set transition only). `EmergencyInterruptionService` listens to this — see below.
+
+### Interruption (`EmergencyInterruptionService`)
+
+`BehaviorManager.Tick` only re-evaluates root behaviors when `_runningExecutor == null`. A beaver mid-sleep (or mid-eat) is therefore deaf to new emergencies until their executor finishes — which for scheduled sleep can be hours of game time. Without intervention, "set Emergency, builders stay napping" was the user-visible bug.
+
+`EmergencyInterruptionService` is an `ILoadableSingleton` that subscribes to `EmergencyConstructionRegistry.JobRegistered`. When a job is added, it:
+
+1. Reads the job's district via `DistrictBuilding.District`.
+2. Pulls every `BuilderHubWorkplaceBehavior`-bearing building in that district from `DistrictBuildingRegistry.GetEnabledBuildings<BuilderHubWorkplaceBehavior>()`.
+3. Iterates each hub's `Workplace.AssignedWorkers`.
+4. For each worker: skips if `NeedManager.AnyNeedIsInCriticalState()` (critical-need beavers shouldn't be yanked off their critical behavior). Otherwise reads `BehaviorManager._runningExecutor` via reflection; if it's an `ApplyEffectExecutor` (the executor used by sleep, eat, drink, and similar rest activities), sets `_finishTimestamp` to `0f` via reflection.
+
+The next `BehaviorManager.Tick` calls `ApplyEffectExecutor.Tick`, which sees an expired timestamp, calls `TurnOffAnimation` (so the beaver doesn't stay visually stuck "Sleeping"), and returns `ExecutorStatus.Success`. The manager clears `_runningExecutor`, falls through to `ProcessBehaviors`, the tree re-evaluates from the top, and `WorkerRootBehavior` picks the emergency on the same tick.
+
+Walks, hauls, and construction work are *not* interrupted — they use different executors and complete on their own short timescale.
+
+On save-load, each persisted Emergency site re-registers and re-fires `JobRegistered`. Multiple registrations interrupt the same beavers multiple times, but the operation is idempotent (setting `_finishTimestamp` to 0 repeatedly is a no-op) so there's no compounding cost.
 
 ### The Harmony patches
 

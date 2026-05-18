@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Timberborn.ConstructionSites;
 
@@ -13,9 +14,14 @@ namespace grantemsley.EmergencyPriority {
 
     public IReadOnlyCollection<ConstructionJob> EmergencyJobs => _emergencyJobs;
 
+    // Fired when a job transitions from unregistered to registered. Listeners
+    // (notably EmergencyInterruptionService) use this to wake builders whose
+    // current executor would otherwise keep them busy for hours.
+    public event Action<ConstructionJob> JobRegistered;
+
     public void Register(ConstructionJob job) {
-      if (job) {
-        _emergencyJobs.Add(job);
+      if (job && _emergencyJobs.Add(job)) {
+        JobRegistered?.Invoke(job);
       }
     }
 
