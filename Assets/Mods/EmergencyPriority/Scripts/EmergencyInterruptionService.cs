@@ -11,6 +11,7 @@ using Timberborn.Navigation;
 using Timberborn.NeedBehaviorSystem;
 using Timberborn.RecoveredGoodSystem;
 using Timberborn.SingletonSystem;
+using Timberborn.SleepSystem;
 using Timberborn.WorkSystem;
 using UnityEngine;
 
@@ -123,11 +124,19 @@ namespace grantemsley.EmergencyPriority {
         FinishTimestampField.SetValue(applyEffectExecutor, 0f);
         return;
       }
+      var runningBehavior = RunningBehaviorField?.GetValue(behaviorManager);
+      // Walking to sleep (home or random sleep spot): the executor is a walk,
+      // not an ApplyEffectExecutor. Null the executor so the next ProcessBehaviors
+      // re-decides — the SleepNeedBehavior.Decide patch then returns ReleaseNow
+      // (unless sleep is at minimum) and WorkerRootBehavior picks the emergency.
+      if (runningBehavior is SleepNeedBehavior) {
+        RunningExecutorField.SetValue(behaviorManager, null);
+        return;
+      }
       // Hauling: if the destination is an emergency site, leave it alone —
       // that haul is feeding the emergency. Otherwise drop the cargo on the
       // ground as a recovered-good stack, release reservations, and null
       // the executor so the beaver re-decides immediately into WorkerRootBehavior.
-      var runningBehavior = RunningBehaviorField?.GetValue(behaviorManager);
       if (runningBehavior is CarryRootBehavior) {
         if (IsHaulingToEmergencySite(worker)) {
           return;

@@ -1,5 +1,7 @@
 using System.Reflection;
 using HarmonyLib;
+using Timberborn.BehaviorSystem;
+using Timberborn.NeedSystem;
 using Timberborn.SleepSystem;
 using UnityEngine;
 
@@ -20,6 +22,37 @@ namespace grantemsley.EmergencyPriority.Patches {
         return true;
       }
       __result = false;
+      return false;
+    }
+
+  }
+
+  // Prefix on SleepNeedBehavior.Decide. If the beaver picked sleep earlier
+  // (scheduled bedtime), Emergency might be flagged mid-walk-home or mid-sleep.
+  // The behavior tree's _returnToBehavior path re-invokes SleepNeedBehavior.
+  // Decide once the running executor releases, and vanilla Decide would walk
+  // home again or restart Sleep. For emergency-employed builders we instead
+  // return ReleaseNow so the tree falls back through to WorkerRootBehavior and
+  // picks up the emergency.
+  //
+  // We still let sleep through if the beaver's sleep need is at the minimum —
+  // that's the "they'd actually pass out" case, and Phase 2's sleep-on-spot
+  // patches will route them through SleepOutside at the current position. The
+  // emergency can wait the few hours it takes to recover.
+  [HarmonyPatch(typeof(SleepNeedBehavior), nameof(SleepNeedBehavior.Decide))]
+  public static class SleepNeedBehaviorDecidePatch {
+
+    public static EmergencyConstructionRegistry Registry { get; set; }
+
+    public static bool Prefix(SleepNeedBehavior __instance, ref Decision __result) {
+      if (!EmergencyBuilderCheck.IsEmergencyBuilder(__instance, Registry)) {
+        return true;
+      }
+      var needManager = __instance.GetComponent<NeedManager>();
+      if (needManager != null && needManager.NeedIsAtMinimumPoints(Sleeper.SleepNeedId)) {
+        return true;
+      }
+      __result = Decision.ReleaseNow();
       return false;
     }
 
