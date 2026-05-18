@@ -22,7 +22,7 @@ Assets/Mods/EmergencyPriority/
 ├── manifest.json                                 # Id: grantemsley.EmergencyPriority; requires Harmony >= 2.3.0
 ├── Data/
 │   └── Localizations/
-│       └── enUS_EmergencyPriority.csv            # dead data; no code reads it yet
+│       └── enUS_EmergencyPriority.csv            # Emergency label + toggle tooltip
 └── Scripts/
     ├── grantemsley.EmergencyPriority.asmdef     # autoReferenced: false, allowUnsafeCode: true
     ├── EmergencyBuilderCheck.cs                 # shared helper: is this beaver an employed builder while emergency jobs exist?
@@ -140,6 +140,7 @@ The loaded Toggle gets the right styles (`priority-toggle` and `content-centered
 2. Hide any Label descendant (BaseField slot — class name varies by Unity version, so we hide every Label).
 3. Tint the toggle's background-image color red (affects the `priority-toggle--checked` highlight).
 4. Add a centered, absolute, bold, red `Label("!")` as the icon. `PickingMode.Ignore` so clicks fall through to the underlying Toggle.
+5. Register a localizable tooltip via `ITooltipRegistrar.RegisterLocalizable(toggle, "grantemsley.EmergencyPriority.EmergencyTooltip")`. The registrar is wired into the static `BuilderPriorityToggleGroupFactoryPatch.TooltipRegistrar` by `EmergencyPatchBootstrap`. Null-safe — if the registrar isn't wired yet, the toggle still works without a tooltip.
 
 The current entity's `EmergencyConstructable` is looked up via `(prioritizable as BaseComponent)?.GetComponent<EmergencyConstructable>()`. `IPrioritizable` is implemented by `BuilderPrioritizable : BaseComponent`, so the cast succeeds for construction sites.
 
@@ -266,8 +267,6 @@ The click-sound check requires `clickEvent.currentTarget == clickEvent.target` (
 - **Cross-mod Harmony patch ordering.** Any other mod patching the same methods may interact unpredictably with our prefixes, especially patch 3 returning `false` to skip the original — that short-circuits other prefixes too. Use Harmony priority annotations if conflicts arise.
 
 - **Reflection fragility.** All private-field access is reflection-based, cached in `static readonly` `FieldInfo` / `MethodInfo`. Static-init guards log when these are null.
-
-- **Dead localization file.** `enUS_EmergencyPriority.csv` contains two entries that no code reads. Either remove or wire a tooltip on the Emergency toggle using `grantemsley.EmergencyPriority.EmergencyTooltip`.
 
 - **No top-bar area tool.** `BuilderPrioritiesButton` (paint priority over an area) doesn't have an Emergency option. Skipped intentionally for Phase 1.
 

@@ -4,6 +4,7 @@ using HarmonyLib;
 using Timberborn.BuilderPrioritySystemUI;
 using Timberborn.CoreUI;
 using Timberborn.PrioritySystemUI;
+using Timberborn.TooltipSystem;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -34,6 +35,11 @@ namespace grantemsley.EmergencyPriority.Patches {
 
     private static readonly Color EmergencyRed = new Color(0.92f, 0.20f, 0.20f, 1f);
     private const string PriorityToggleUxmlPath = "Game/EntityPanel/PriorityToggle";
+    private const string EmergencyTooltipLocKey = "grantemsley.EmergencyPriority.EmergencyTooltip";
+
+    // Wired by EmergencyPatchBootstrap.Load. Null until then; tooltip
+    // registration silently skips, which is fine — the toggle still works.
+    public static ITooltipRegistrar TooltipRegistrar { get; set; }
 
     // PriorityToggleGroup → its emergency controller. Weak so dead groups (from
     // previous scene loads) are collected and don't accumulate over a session.
@@ -107,6 +113,7 @@ namespace grantemsley.EmergencyPriority.Patches {
       // red so the selection state matches the icon color.
       toggle.style.unityBackgroundImageTintColor = new StyleColor(EmergencyRed);
       AddIcon(toggle);
+      TooltipRegistrar?.RegisterLocalizable(toggle, EmergencyTooltipLocKey);
       return toggle;
     }
 
