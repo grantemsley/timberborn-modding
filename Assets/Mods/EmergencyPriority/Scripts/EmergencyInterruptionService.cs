@@ -78,7 +78,9 @@ namespace grantemsley.EmergencyPriority {
       if (!job) {
         return;
       }
-      var district = job.GetComponent<DistrictBuilding>()?.District;
+      // Construction sites are unfinished, so District is null; use
+      // ConstructionDistrict (via the helper) for the lookup.
+      var district = job.GetComponent<DistrictBuilding>()?.GetDistrictOrConstructionDistrict();
       if (district == null) {
         return;
       }

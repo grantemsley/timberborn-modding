@@ -53,13 +53,17 @@ namespace grantemsley.EmergencyPriority.Patches {
       if (accessible == null) {
         return true;
       }
-      var hubDistrict = accessible.GetComponent<DistrictBuilding>()?.District;
+      var hubDistrict = accessible.GetComponent<DistrictBuilding>()?.GetDistrictOrConstructionDistrict();
       bool sameDistrictEmergencyExists = false;
       foreach (var job in registry.EmergencyJobs) {
         if (!job) {
           continue;
         }
-        var jobDistrict = job.GetComponent<DistrictBuilding>()?.District;
+        // Construction sites have ConstructionDistrict (not District) set while
+        // unfinished. GetDistrictOrConstructionDistrict prefers District but
+        // falls back to ConstructionDistrict — correct for both a finished hub
+        // and an unfinished construction site.
+        var jobDistrict = job.GetComponent<DistrictBuilding>()?.GetDistrictOrConstructionDistrict();
         if (jobDistrict != hubDistrict) {
           continue;
         }
