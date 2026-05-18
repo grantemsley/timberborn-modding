@@ -17,7 +17,8 @@ namespace grantemsley.EmergencyPriority {
       BuilderHubWorkplaceBehaviorPatch.Registry = _registry;
       WorkerRootBehaviorPatch.Registry = _registry;
       BeaverNeedBehaviorPickerPatch.Registry = _registry;
-      SleepNeedBehaviorPatch.Registry = _registry;
+      SleepNeedBehaviorShouldSleepAtHomePatch.Registry = _registry;
+      SleepNeedBehaviorSleepOutsidePatch.Registry = _registry;
     }
 
   }
