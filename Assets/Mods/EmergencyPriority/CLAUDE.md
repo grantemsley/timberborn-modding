@@ -6,7 +6,7 @@ A Timberborn 1.0 mod that adds a 6th "Emergency" priority above Very High for co
 
 **Phase 1 in-game tested and working.** Beavers finish their current task and immediately switch to the emergency job, work past their schedule, and revert when the emergency clears. UI looks right: red "!" toggle, click-sound plays, standard priority deselects visually when Emergency is on, and clicking a standard priority clears Emergency. Save/load with persistent emergency flags still **untested** (flagged as the one in-game scenario worth verifying).
 
-**Phase 2 pending** — patch `BeaverNeedBehaviorPicker.ShouldPickEssentialAction` (suppress scheduled sleep) and `SleepNeedBehavior.ShouldSleepAtHome` (force the sleep-outside path so builders sleep near worksite instead of walking home).
+**Phase 2 complete (untested)** — patches on `BeaverNeedBehaviorPicker.ShouldPickEssentialAction` (suppress scheduled sleep) and `SleepNeedBehavior.ShouldSleepAtHome` (force the sleep-outside path so builders sleep near worksite instead of walking home).
 
 **Phase 3 pending** — patch `DistrictNeedBehaviorService.PickShortestAction` so beavers in critical food/water state grab the closest source regardless of preference, measured by `ActionDurationCalculator.DurationWithReturnInHours`.
 
@@ -25,6 +25,7 @@ Assets/Mods/EmergencyPriority/
 │       └── enUS_EmergencyPriority.csv            # dead data; no code reads it yet
 └── Scripts/
     ├── grantemsley.EmergencyPriority.asmdef     # autoReferenced: false, allowUnsafeCode: true
+    ├── EmergencyBuilderCheck.cs                 # shared helper: is this beaver an employed builder while emergency jobs exist?
     ├── EmergencyConstructable.cs                # BaseComponent on construction sites
     ├── EmergencyConstructionRegistry.cs         # singleton; HashSet of emergency-flagged ConstructionJobs
     ├── EmergencyPatchBootstrap.cs               # ILoadableSingleton that hands registry to static patch fields
@@ -32,10 +33,12 @@ Assets/Mods/EmergencyPriority/
     ├── EmergencyPriorityModStarter.cs           # IModStarter; calls Harmony.PatchAll
     ├── EmergencyToggleController.cs             # lifecycle/state for the 6th toggle (Enable/Disable/UpdateState)
     └── Patches/
+        ├── BeaverNeedBehaviorPickerPatch.cs     # prefix ShouldPickEssentialAction → suppress scheduled sleep for emergency builders
         ├── BuilderHubWorkplaceBehaviorPatch.cs  # prefix Decide → try emergency jobs first
         ├── BuilderPriorityToggleGroupFactoryPatch.cs  # postfix Create → inject 6th toggle
         ├── PriorityToggleGroupPatch.cs          # postfix Enable/Disable/UpdateGroup → dispatch to controller
         ├── PriorityToggleSelectionPatch.cs      # postfix OnValueChanged → auto-clear Emergency on standard click
+        ├── SleepNeedBehaviorPatch.cs            # prefix ShouldSleepAtHome → force SleepOutside path for emergency builders
         └── WorkerRootBehaviorPatch.cs           # prefix Decide → bypass AreWorkingHours for builders
 ```
 
@@ -97,7 +100,7 @@ Bound as singleton in `EmergencyPriorityConfigurator`. `EmergencyPatchBootstrap`
 
 Iteration order is undefined (HashSet); when multiple sites are flagged, the pick order is arbitrary. A `SortedSet<ConstructionJob>` keyed on `InstantiationOrder` would mirror the base game's tiebreaker if deterministic ordering becomes important.
 
-### The five Harmony patches
+### The Harmony patches
 
 | # | Target | Type | Purpose |
 |---|---|---|---|
@@ -106,8 +109,12 @@ Iteration order is undefined (HashSet); when multiple sites are flagged, the pic
 | 1c | `PriorityToggle.OnValueChanged` | Postfix | When the user picks one of the 5 standard priorities (`newValue = true`) on an entity that currently has Emergency set, clear the Emergency flag. Reads `_prioritizable` via reflection. |
 | 2 | `BuilderHubWorkplaceBehavior.Decide` | Prefix | If the registry has any jobs, iterate them and call `ConstructionJob.StartConstructionJob(agent, accessible)` directly. First accepting job short-circuits the original `Priorities.Descending` loop. Reads `_accessible` via reflection. |
 | 3 | `WorkerRootBehavior.Decide` | Prefix | If registry has any jobs AND the beaver's workplace contains a `BuilderHubWorkplaceBehavior` AND `!WorkRefuser.RefusesWork`, invoke private `DecideAsWorker()` via reflection — skipping the `AreWorkingHours` gate. Bots use the same code path, so they're also affected. |
+| 4 | `BeaverNeedBehaviorPicker.ShouldPickEssentialAction` | Prefix | For emergency-employed builders, skip the `ItIsTimeForEssentialAction` (scheduled-sleep-near-dawn) trigger. Sleep only wins when `EssentialActionIsAtMinimumPoints` says the need has actually bottomed out. Reflection on `_appraiser`, `_needManager`, `Appraiser.AppraiseEffect`, `NeedManager.NeedIsAtMinimumPoints`. |
+| 5 | `SleepNeedBehavior.ShouldSleepAtHome` | Prefix | For emergency-employed builders, return `false` to force the SleepOutside path. `WalkToRandomSleepingPosition` then picks a destination near the beaver's current position (the worksite). `GetEssentialAction` also routes through this, so the essential action's position becomes "here, now" rather than home. |
 
 `CriticalNeederRootBehavior` runs above `WorkerRootBehavior` in the behavior tree, so beavers in critical-need state still preempt the emergency override. That's how we get "ignore needs but don't die": critical state always wins.
+
+Patches 4 and 5 share `EmergencyBuilderCheck.IsEmergencyBuilder(entity, registry)` — checks that the registry has any jobs, the entity has a `Worker` employed at a workplace containing a `BuilderHubWorkplaceBehavior`. `BeaverNeedBehaviorPicker` and `SleepNeedBehavior` are both `BaseComponent`s on the beaver entity, so `GetComponent<Worker>()` works.
 
 ### Static-constructor reflection guards
 
@@ -268,16 +275,6 @@ The click-sound check requires `clickEvent.currentTarget == clickEvent.target` (
 - **No `[HarmonyPriority]` annotations.** Our patches don't declare priority relative to other mods. Add `[HarmonyPriority]` if conflicts surface.
 
 ---
-
-## Phase 2 plan (sleep override)
-
-Two more patches:
-
-- **`BeaverNeedBehaviorPicker.ShouldPickEssentialAction`** (prefix) — if `__instance._needManager`'s owning beaver has Worker→Workplace with a BuilderHubWorkplaceBehavior AND registry has emergency jobs, bypass `ItIsTimeForEssentialAction` (the close-to-dawn scheduled-sleep trigger) and set `__result = __instance.EssentialActionIsAtMinimumPoints(...)`. Sleep still wins when sleep need bottoms out.
-
-- **`SleepNeedBehavior.ShouldSleepAtHome`** (prefix) — same builder-emergency check; return `__result = false` to force the `SleepOutside` path. `WalkToRandomSleepingPosition` then picks a spot near the beaver's current position (which will be the worksite, since they were working).
-
-Caching the "is this beaver an emergency builder" check on a `ConditionalWeakTable<BeaverNeedBehaviorPicker, bool>` keyed on instance is probably worth it for perf — the patch fires per-beaver per-tick.
 
 ## Phase 3 plan (closest food)
 
