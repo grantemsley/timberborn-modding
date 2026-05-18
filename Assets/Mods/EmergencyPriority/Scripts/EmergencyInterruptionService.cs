@@ -1,6 +1,7 @@
 using System.Reflection;
 using Timberborn.BehaviorSystem;
 using Timberborn.BuilderHubSystem;
+using Timberborn.Carrying;
 using Timberborn.ConstructionSites;
 using Timberborn.GameDistricts;
 using Timberborn.NeedBehaviorSystem;
@@ -32,6 +33,8 @@ namespace grantemsley.EmergencyPriority {
 
     private static readonly FieldInfo RunningExecutorField =
         typeof(BehaviorManager).GetField("_runningExecutor", AnyInstance);
+    private static readonly FieldInfo RunningBehaviorField =
+        typeof(BehaviorManager).GetField("_runningBehavior", AnyInstance);
     private static readonly FieldInfo FinishTimestampField =
         typeof(ApplyEffectExecutor).GetField("_finishTimestamp", AnyInstance);
 
@@ -43,10 +46,13 @@ namespace grantemsley.EmergencyPriority {
 
     public void Load() {
       if (RunningExecutorField == null) {
-        Debug.LogError("[EmergencyPriority] Could not find BehaviorManager._runningExecutor; cannot interrupt sleeping builders on Emergency.");
+        Debug.LogError("[EmergencyPriority] Could not find BehaviorManager._runningExecutor; cannot interrupt resting builders on Emergency.");
+      }
+      if (RunningBehaviorField == null) {
+        Debug.LogError("[EmergencyPriority] Could not find BehaviorManager._runningBehavior; cannot interrupt hauling builders on Emergency.");
       }
       if (FinishTimestampField == null) {
-        Debug.LogError("[EmergencyPriority] Could not find ApplyEffectExecutor._finishTimestamp; cannot interrupt sleeping builders on Emergency.");
+        Debug.LogError("[EmergencyPriority] Could not find ApplyEffectExecutor._finishTimestamp; cannot interrupt resting builders on Emergency.");
       }
       _registry.JobRegistered += OnJobRegistered;
     }
@@ -89,10 +95,24 @@ namespace grantemsley.EmergencyPriority {
       if (needManager != null && needManager.AnyNeedIsInCriticalState()) {
         return;
       }
-      if (!(RunningExecutorField.GetValue(behaviorManager) is ApplyEffectExecutor executor)) {
+      var executor = RunningExecutorField.GetValue(behaviorManager);
+      if (executor == null) {
         return;
       }
-      FinishTimestampField.SetValue(executor, 0f);
+      // Resting (sleep/eat/drink): force the executor's own finish path so
+      // animations clean up properly.
+      if (executor is ApplyEffectExecutor applyEffectExecutor) {
+        FinishTimestampField.SetValue(applyEffectExecutor, 0f);
+        return;
+      }
+      // Hauling: cancel the walk executor so the beaver re-decides immediately.
+      // The CarryRootBehavior prefix then returns ReleaseNow (unless this haul
+      // is destined for the emergency site itself), and WorkerRootBehavior
+      // picks up the emergency.
+      var runningBehavior = RunningBehaviorField?.GetValue(behaviorManager);
+      if (runningBehavior is CarryRootBehavior) {
+        RunningExecutorField.SetValue(behaviorManager, null);
+      }
     }
 
   }

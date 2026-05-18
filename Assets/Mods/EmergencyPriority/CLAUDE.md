@@ -37,6 +37,7 @@ Assets/Mods/EmergencyPriority/
         ├── BeaverNeedBehaviorPickerPatch.cs     # prefix ShouldPickEssentialAction → suppress scheduled sleep for emergency builders
         ├── BuilderHubWorkplaceBehaviorPatch.cs  # prefix Decide → try emergency jobs first
         ├── BuilderPriorityToggleGroupFactoryPatch.cs  # postfix Create → inject 6th toggle
+        ├── CarryRootBehaviorPatch.cs            # prefix Decide → skip non-emergency hauls; keep cargo in hand until emergency clears
         ├── DistrictNeedBehaviorServicePatch.cs  # prefix PickShortestAction → closest food/water for emergency builders in critical state
         ├── PriorityToggleGroupPatch.cs          # postfix Enable/Disable/UpdateGroup → dispatch to controller
         ├── PriorityToggleSelectionPatch.cs      # postfix OnValueChanged → auto-clear Emergency on standard click
@@ -113,11 +114,13 @@ Iteration order is undefined (HashSet); when multiple sites are flagged, the pic
 1. Reads the job's district via `DistrictBuilding.District`.
 2. Pulls every `BuilderHubWorkplaceBehavior`-bearing building in that district from `DistrictBuildingRegistry.GetEnabledBuildings<BuilderHubWorkplaceBehavior>()`.
 3. Iterates each hub's `Workplace.AssignedWorkers`.
-4. For each worker: skips if `NeedManager.AnyNeedIsInCriticalState()` (critical-need beavers shouldn't be yanked off their critical behavior). Otherwise reads `BehaviorManager._runningExecutor` via reflection; if it's an `ApplyEffectExecutor` (the executor used by sleep, eat, drink, and similar rest activities), sets `_finishTimestamp` to `0f` via reflection.
+4. For each worker: skips if `NeedManager.AnyNeedIsInCriticalState()` (critical-need beavers shouldn't be yanked off their critical behavior). Otherwise reads `BehaviorManager._runningExecutor` and `_runningBehavior` via reflection:
+   - If the executor is an `ApplyEffectExecutor` (sleep, eat, drink, etc.), set `_finishTimestamp` to `0f`. Next tick the executor sees the expired timestamp, calls `TurnOffAnimation`, and returns `ExecutorStatus.Success` — so animations clean up properly.
+   - If the running behavior is `CarryRootBehavior` (hauling), null out `_runningExecutor` directly. The next `ProcessBehaviors` revisits `CarryRootBehavior.Decide`, our patch returns `ReleaseNow` for non-emergency hauls, and the tree continues to `WorkerRootBehavior`.
 
-The next `BehaviorManager.Tick` calls `ApplyEffectExecutor.Tick`, which sees an expired timestamp, calls `TurnOffAnimation` (so the beaver doesn't stay visually stuck "Sleeping"), and returns `ExecutorStatus.Success`. The manager clears `_runningExecutor`, falls through to `ProcessBehaviors`, the tree re-evaluates from the top, and `WorkerRootBehavior` picks the emergency on the same tick.
+The cleanup path works because `Decision.ReleaseWhenFinished` sets `shouldReturnToBehavior: false` for sleep, so once the executor clears, `ProcessBehaviors` evaluates the tree from the top. For hauls (`Decision.ReturnWhenFinished`), `_returnToBehavior` is true and `CarryRootBehavior.Decide` is consulted again — our patch (#7) handles it.
 
-Walks, hauls, and construction work are *not* interrupted — they use different executors and complete on their own short timescale.
+Construction work and other walks aren't interrupted — they use different executors / behaviors and complete on their own short timescale.
 
 On save-load, each persisted Emergency site re-registers and re-fires `JobRegistered`. Multiple registrations interrupt the same beavers multiple times, but the operation is idempotent (setting `_finishTimestamp` to 0 repeatedly is a no-op) so there's no compounding cost.
 
@@ -134,10 +137,11 @@ On save-load, each persisted Emergency site re-registers and re-fires `JobRegist
 | 5a | `SleepNeedBehavior.ShouldSleepAtHome` | Prefix | For emergency-employed builders, return `false` to force the SleepOutside path. `GetEssentialAction` also routes through this, so the essential action's position becomes "here, now" rather than home. |
 | 5b | `SleepNeedBehavior.SleepOutside` | Prefix | For emergency-employed builders, pre-set `_walkedToSleepingPosition = true` so the original method skips `WalkToRandomSleepingPosition` and goes straight to `Sleep()` at the current position. Without this, `RandomDestinationPicker.GetCoordinates` anchors the random destination on the beaver's *home* (not the worksite), dragging emergency builders back near home before sleeping. `Sleep()` resets the flag, so normal beavers are unaffected. |
 | 6 | `DistrictNeedBehaviorService.PickShortestAction` | Prefix | When `onlyNeedsInCriticalState == true` AND the calling beaver is an emergency builder, scan all groups in `_appraisedNeedBehaviors` and return the globally shortest-duration action (by `ActionDurationCalculator.DurationWithReturnInHours`). Vanilla iterates groups in descending-points order and returns the highest-points group's shortest behavior, which can drag a starving builder past closer food to their favorite. Reflection on the private nested struct `AppraisedNeedBehaviorGroup` (`NeedBehaviorGroup`/`Points` properties) and the private `_appraisedNeedBehaviors` field. |
+| 7 | `CarryRootBehavior.Decide` | Prefix | For emergency-employed builders, return `Decision.ReleaseNow()` to skip carry/delivery logic — the beaver keeps the cargo in hand and falls through the behavior tree to `WorkerRootBehavior`, picking up the emergency immediately. Exception: hauls destined for an emergency site (detected by `GoodReserver.CapacityReservation.Inventory.GetComponent<ConstructionJob>()` being in the registry) proceed normally so we don't starve the emergency of materials. When the registry empties, vanilla `CarryRootBehavior` runs again and the beaver delivers the cargo to its original destination (or to a fallback inventory if that destination is gone). |
 
 `CriticalNeederRootBehavior` runs above `WorkerRootBehavior` in the behavior tree, so beavers in critical-need state still preempt the emergency override. That's how we get "ignore needs but don't die": critical state always wins.
 
-Patches 4, 5, and 6 share `EmergencyBuilderCheck.IsEmergencyBuilder(entity, registry)` — checks that the registry has any jobs and the entity has a `Worker` employed at a workplace containing a `BuilderHubWorkplaceBehavior`. `BeaverNeedBehaviorPicker`, `SleepNeedBehavior`, and `NeedManager` are all `BaseComponent`s on the beaver entity, so `GetComponent<Worker>()` works for each.
+Patches 4, 5, 6, and 7 share `EmergencyBuilderCheck.IsEmergencyBuilder(entity, registry)` — checks that the registry has any jobs and the entity has a `Worker` employed at a workplace containing a `BuilderHubWorkplaceBehavior`. `BeaverNeedBehaviorPicker`, `SleepNeedBehavior`, `NeedManager`, and `CarryRootBehavior` are all `BaseComponent`s on the beaver entity, so `GetComponent<Worker>()` works for each.
 
 ### Static-constructor reflection guards
 

@@ -24,6 +24,7 @@ namespace grantemsley.EmergencyPriority {
       SleepNeedBehaviorShouldSleepAtHomePatch.Registry = _registry;
       SleepNeedBehaviorSleepOutsidePatch.Registry = _registry;
       DistrictNeedBehaviorServicePatch.Registry = _registry;
+      CarryRootBehaviorPatch.Registry = _registry;
       BuilderPriorityToggleGroupFactoryPatch.TooltipRegistrar = _tooltipRegistrar;
     }
 
