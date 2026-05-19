@@ -4,13 +4,19 @@ A Timberborn 1.0 mod that adds a 6th "Emergency" priority above Very High for co
 
 ## Status
 
-**Phase 1 in-game tested and working.** Beavers finish their current task and immediately switch to the emergency job, work past their schedule, and revert when the emergency clears. UI looks right: red "!" toggle, click-sound plays, standard priority deselects visually when Emergency is on, and clicking a standard priority clears Emergency. Save/load preserves Emergency flags across reloads.
+**v1 complete — all behaviors verified in-game.** Every test case in the test plan (Tiers 1–4 including multi-district) passes. See commit history for the test-driven fix sequence.
 
-**Phase 2 in-game tested and working.** Patches on `BeaverNeedBehaviorPicker.ShouldPickEssentialAction` suppress scheduled sleep; `SleepNeedBehavior.ShouldSleepAtHome` + `SleepNeedBehavior.SleepOutside` make emergency builders sleep on the spot at the worksite instead of walking back near home.
+**Phase 1: emergency construction routing.** Beavers and bots assigned to a Builder Hub (or District Center) finish their current task and switch to emergency-flagged jobs. UI presents the 6th red "!" toggle, behaves like a single 6-option radio (clicking any standard priority clears Emergency), and persists across save/load. Building works for sites on paths, adjacent to paths, or on walkable terrain reachable from a road.
 
-**Phase 3 in-game tested and working.** Patch on `DistrictNeedBehaviorService.PickShortestAction` makes emergency builders in critical food/water state grab the globally-closest source (shortest `ActionDurationCalculator.DurationWithReturnInHours`) instead of the vanilla "highest-points group → shortest in that group" path. Non-emergency beavers and the non-critical path are unchanged.
+**Phase 2: schedule and sleep override.** Emergency builders work past their normal shift. When sleep need bottoms out, they lie down at the worksite (not walking home). Sleeping beavers are interrupted the moment Emergency is flagged.
 
-**Stretch/optional** — extend the Emergency toggle to the top-bar BuilderPrioritiesButton area tool (paint Emergency over an area). Not in scope for Phases 1–3.
+**Phase 3: closest food/water in critical state.** Emergency builders in critical hunger/thirst grab the closest valid source rather than walking past closer food to their preferred type. Non-emergency beavers and non-critical states are unchanged.
+
+**Phase 4: interruption.** Setting Emergency mid-play interrupts sleeping/eating/drinking beavers, drops cargo on the ground (as a Recovered Goods stack) for beavers mid-haul to non-emergency destinations, and forces walks-to-bed to re-decide. In-flight hauls TO an emergency site are not interrupted; hauls already carrying cargo finish their delivery before re-deciding (no carry-through to the next emergency).
+
+**Multi-district.** Verified working. Builders only idle when their own district has an active emergency; cross-district hubs continue normal work.
+
+**Stretch/optional** — extend the Emergency toggle to the top-bar BuilderPrioritiesButton area tool (paint Emergency over an area). Not in v1 scope; possible v1.1.
 
 ---
 
