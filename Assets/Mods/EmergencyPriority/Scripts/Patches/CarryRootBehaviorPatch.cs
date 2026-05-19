@@ -4,8 +4,6 @@ using Timberborn.Carrying;
 using Timberborn.ConstructionSites;
 using Timberborn.InventorySystem;
 using Timberborn.NeedSystem;
-using Timberborn.WorkSystem;
-using UnityEngine;
 
 namespace grantemsley.EmergencyPriority.Patches {
 
@@ -38,38 +36,31 @@ namespace grantemsley.EmergencyPriority.Patches {
 
     public static EmergencyConstructionRegistry Registry { get; set; }
 
-    // Toggle to true to dump per-call diagnostic logs to the Unity console.
-    // Keep false in normal play — verbose during emergency activity.
-    private const bool VerboseLogging = true;
-
     public static bool Prefix(CarryRootBehavior __instance, ref Decision __result) {
       var registry = Registry;
       if (registry == null || !registry.HasAny) {
         return true;
       }
-      var workerType = __instance.GetComponent<Worker>()?.WorkerType ?? "?";
-      var name = __instance.Name;
       if (!EmergencyBuilderCheck.IsEmergencyBuilder(__instance, registry)) {
-        if (VerboseLogging) Debug.Log($"[EmergencyPriority] CarryPatch {name} ({workerType}): not emergency builder → vanilla");
         return true;
       }
       var needManager = __instance.GetComponent<NeedManager>();
       if (needManager != null && needManager.AnyNeedIsInCriticalState()) {
-        if (VerboseLogging) Debug.Log($"[EmergencyPriority] CarryPatch {name} ({workerType}): critical need → vanilla");
         return true;
       }
+      // Already mid-haul → let vanilla finish the delivery. Avoids the
+      // "carry through to the new emergency site" visual bug.
       var goodCarrier = __instance.GetComponent<GoodCarrier>();
       if (goodCarrier != null && goodCarrier.IsCarrying) {
-        if (VerboseLogging) Debug.Log($"[EmergencyPriority] CarryPatch {name} ({workerType}): IsCarrying → vanilla");
         return true;
       }
+      // Reservation is destined for an emergency site → let vanilla run so
+      // the beaver picks up the materials and delivers them to the emergency.
+      // Without this, bots (and beavers, for that matter) get stuck idle
+      // next to a missing-materials emergency.
       if (IsHaulToEmergencySite(__instance, registry)) {
-        if (VerboseLogging) Debug.Log($"[EmergencyPriority] CarryPatch {name} ({workerType}): dest is emergency → vanilla");
         return true;
       }
-      var reserver = __instance.GetComponent<GoodReserver>();
-      var hasReserved = reserver != null && reserver.HasReservedCapacity;
-      if (VerboseLogging) Debug.Log($"[EmergencyPriority] CarryPatch {name} ({workerType}): blocking, hasReservation={hasReserved}");
       __result = Decision.ReleaseNow();
       return false;
     }
@@ -77,22 +68,15 @@ namespace grantemsley.EmergencyPriority.Patches {
     private static bool IsHaulToEmergencySite(CarryRootBehavior carry,
                                               EmergencyConstructionRegistry registry) {
       var reserver = carry.GetComponent<GoodReserver>();
-      if (reserver == null) {
-        if (VerboseLogging) Debug.Log($"[EmergencyPriority] IsHaulToEmergencySite {carry.Name}: no GoodReserver");
-        return false;
-      }
-      if (!reserver.HasReservedCapacity) {
-        if (VerboseLogging) Debug.Log($"[EmergencyPriority] IsHaulToEmergencySite {carry.Name}: no capacity reservation");
+      if (reserver == null || !reserver.HasReservedCapacity) {
         return false;
       }
       var destInventory = reserver.CapacityReservation.Inventory;
       if (destInventory == null) {
-        if (VerboseLogging) Debug.Log($"[EmergencyPriority] IsHaulToEmergencySite {carry.Name}: reservation has null Inventory");
         return false;
       }
       var destJob = destInventory.GetComponent<ConstructionJob>();
       if (destJob == null) {
-        if (VerboseLogging) Debug.Log($"[EmergencyPriority] IsHaulToEmergencySite {carry.Name}: dest {destInventory.Name} has no ConstructionJob (not a construction site)");
         return false;
       }
       foreach (var emergencyJob in registry.EmergencyJobs) {
@@ -100,7 +84,6 @@ namespace grantemsley.EmergencyPriority.Patches {
           return true;
         }
       }
-      if (VerboseLogging) Debug.Log($"[EmergencyPriority] IsHaulToEmergencySite {carry.Name}: dest {destInventory.Name} has ConstructionJob but it's NOT in emergency registry");
       return false;
     }
 
