@@ -5,6 +5,7 @@ using Timberborn.BuildingsNavigation;
 using Timberborn.BuilderHubSystem;
 using Timberborn.ConstructionSites;
 using Timberborn.Navigation;
+using Timberborn.WorkSystem;
 using UnityEngine;
 
 namespace grantemsley.EmergencyPriority.Patches {
@@ -39,6 +40,8 @@ namespace grantemsley.EmergencyPriority.Patches {
 
     public static EmergencyConstructionRegistry Registry { get; set; }
 
+    private const bool VerboseLogging = true;
+
     static BuilderHubWorkplaceBehaviorPatch() {
       if (AccessibleField == null) {
         Debug.LogError("[EmergencyPriority] Could not find BuilderHubWorkplaceBehavior._accessible; emergency job override disabled.");
@@ -59,25 +62,31 @@ namespace grantemsley.EmergencyPriority.Patches {
       if (accessible == null) {
         return true;
       }
+      var workerType = agent.GetComponent<Worker>()?.WorkerType ?? "?";
+      var agentName = agent.Name;
       bool anyReachableEmergency = false;
       foreach (var job in registry.EmergencyJobs) {
         if (!job) {
           continue;
         }
         if (!IsReachableFromHub(job, accessible)) {
+          if (VerboseLogging) Debug.Log($"[EmergencyPriority] HubPatch {agentName} ({workerType}): emergency {job.Name} unreachable");
           continue;
         }
         anyReachableEmergency = true;
         var (behavior, decision) = job.StartConstructionJob(agent, accessible);
+        if (VerboseLogging) Debug.Log($"[EmergencyPriority] HubPatch {agentName} ({workerType}): emergency {job.Name} StartConstructionJob → releaseNow={decision.ShouldReleaseNow} behavior={behavior?.GetType().Name ?? "null"}");
         if (!decision.ShouldReleaseNow) {
           __result = Decision.TransferNow(behavior, in decision);
           return false;
         }
       }
       if (anyReachableEmergency) {
+        if (VerboseLogging) Debug.Log($"[EmergencyPriority] HubPatch {agentName} ({workerType}): all reachable emergencies release-now → idle");
         __result = Decision.ReleaseNow();
         return false;
       }
+      if (VerboseLogging) Debug.Log($"[EmergencyPriority] HubPatch {agentName} ({workerType}): no reachable emergency → vanilla");
       return true;
     }
 
